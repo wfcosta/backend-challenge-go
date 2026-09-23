@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/wfcosta/backend-challenge-go/internal/application"
+	"github.com/wfcosta/backend-challenge-go/internal/auth"
 	"github.com/wfcosta/backend-challenge-go/internal/domain"
 	"github.com/wfcosta/backend-challenge-go/internal/store"
 )
@@ -157,7 +158,22 @@ func main() {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
-	server := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	var handler http.Handler = mux
+	issuer := os.Getenv("OIDC_ISSUER_URL")
+	if issuer != "" {
+		audiencia := os.Getenv("OIDC_AUDIENCE")
+		if audiencia == "" {
+			audiencia = "provider-a"
+		}
+		autenticador, err := auth.NovoAutenticador(context.Background(), issuer, audiencia)
+		if err != nil {
+			slog.Error("falha ao configurar OIDC", "erro", err)
+			os.Exit(1)
+		}
+		defer autenticador.Fechar()
+		handler = autenticarRotas(handler, autenticador)
+	}
+	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("http server stopped", "error", err)
@@ -170,6 +186,17 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = server.Shutdown(ctx)
+}
+
+func autenticarRotas(proximo http.Handler, autenticador *auth.Autenticador) http.Handler {
+	protegido := autenticador.Middleware(proximo)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health/live" || r.URL.Path == "/health/ready" {
+			proximo.ServeHTTP(w, r)
+			return
+		}
+		protegido.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
