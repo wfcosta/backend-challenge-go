@@ -26,4 +26,4 @@ docker compose down
 Testes unitários usam mocks das portas; testes de integração devem usar PostgreSQL, Keycloak e LocalStack reais.
 
 ## Documentação
-spec.md contém requisitos funcionais; spec tecnica.md contém arquitetura técnica; plan.md contém tarefas/BDD; ARCHITECTURE.md contém decisões e diagramas.
+spec.md contém requisitos funcionais; spec tecnica.md contém arquitetura técnica; plan.md contém tarefas/BDD; ARCHITECTURE.md contém decisões e diagramas; docs/architecture.md explica a correspondência com Controller/Service/Entity do Java; docs/openapi.yaml é o contrato Swagger/OpenAPI.

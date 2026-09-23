@@ -1,0 +1,59 @@
+openapi: 3.0.3
+info:
+  title: Jungle Gaming Wager API
+  version: 1.0.0
+  description: API autenticada para carteiras e processamento de apostas.
+servers:
+  - url: http://localhost:8081
+security:
+  - bearerAuth: []
+paths:
+  /health/live:
+    get:
+      security: []
+      summary: Verifica se o processo está vivo
+      responses:
+        '200': {description: Processo disponível}
+  /health/ready:
+    get:
+      security: []
+      summary: Verifica dependências
+      responses:
+        '200': {description: Serviço pronto}
+        '503': {description: Dependência indisponível}
+  /wallets:
+    post:
+      summary: Cria uma carteira
+      responses:
+        '201': {description: Carteira criada}
+        '400': {description: Entrada inválida}
+        '409': {description: Conflito}
+  /wallets/{walletId}:
+    get:
+      summary: Consulta uma carteira
+      parameters:
+        - name: walletId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200': {description: Carteira}
+        '404': {description: Não encontrada}
+  /wagering/transactions:
+    post:
+      summary: Processa uma operação financeira
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Processada ou replay}
+        '409': {description: Conflito de idempotência}
+        '422': {description: Rejeição de negócio}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
