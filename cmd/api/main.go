@@ -9,6 +9,9 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/wfcosta/backend-challenge-go/internal/domain"
+	"github.com/wfcosta/backend-challenge-go/internal/store"
 )
 
 func main() {
@@ -17,6 +20,45 @@ func main() {
 		addr = ":8081"
 	}
 	mux := http.NewServeMux()
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL != "" {
+		db, err := store.New(context.Background(), databaseURL)
+		if err != nil {
+			slog.Error("database unavailable", "error", err)
+			os.Exit(1)
+		}
+		defer db.Close()
+		mux.HandleFunc("POST /wallets", func(w http.ResponseWriter, r *http.Request) {
+			var input map[string]any
+			if json.NewDecoder(r.Body).Decode(&input) != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+				return
+			}
+			playerID, _ := input["playerId"].(string)
+			balance, _ := input["initialBalance"].(map[string]any)
+			amount, _ := balance["amount"].(string)
+			currency, _ := balance["currency"].(string)
+			money, err := domain.NewMoney(amount, currency)
+			if playerID == "" || err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+				return
+			}
+			wallet, err := db.CreateWallet(r.Context(), playerID, money)
+			if err != nil {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusCreated, map[string]any{"id": wallet.ID, "playerId": wallet.Player, "balance": moneyJSON(wallet.Balance), "version": wallet.Version})
+		})
+		mux.HandleFunc("GET /wallets/{id}", func(w http.ResponseWriter, r *http.Request) {
+			wallet, err := db.GetWallet(r.Context(), r.PathValue("id"))
+			if err != nil {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"id": wallet.ID, "playerId": wallet.Player, "balance": moneyJSON(wallet.Balance), "version": wallet.Version})
+		})
+	}
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ready"}) })
 	server := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
@@ -38,4 +80,8 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func moneyJSON(m domain.Money) map[string]string {
+	return map[string]string{"amount": m.String(), "currency": m.Currency()}
 }
