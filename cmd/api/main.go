@@ -45,21 +45,19 @@ func main() {
 		}
 		defer db.Close()
 		mux.HandleFunc("POST /wallets", func(w http.ResponseWriter, r *http.Request) {
-			var input map[string]any
-			if json.NewDecoder(r.Body).Decode(&input) != nil {
+			var input criarCarteiraHTTP
+			decodificador := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+			decodificador.DisallowUnknownFields()
+			if decodificador.Decode(&input) != nil || input.Validar() != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 				return
 			}
-			playerID, _ := input["playerId"].(string)
-			balance, _ := input["initialBalance"].(map[string]any)
-			amount, _ := balance["amount"].(string)
-			currency, _ := balance["currency"].(string)
-			money, err := domain.NewMoney(amount, currency)
-			if playerID == "" || err != nil {
+			money, err := domain.NewMoney(input.InitialBalance.Amount, input.InitialBalance.Currency)
+			if err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 				return
 			}
-			wallet, err := db.CreateWallet(r.Context(), playerID, money)
+			wallet, err := db.CreateWallet(r.Context(), input.PlayerID, money)
 			if err != nil {
 				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 				return
@@ -303,6 +301,21 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 type dinheiroHTTP struct {
 	Amount   string `json:"amount"`
 	Currency string `json:"currency"`
+}
+
+type criarCarteiraHTTP struct {
+	PlayerID       string       `json:"playerId"`
+	InitialBalance dinheiroHTTP `json:"initialBalance"`
+}
+
+func (c criarCarteiraHTTP) Validar() error {
+	if strings.TrimSpace(c.PlayerID) == "" || strings.TrimSpace(c.InitialBalance.Amount) == "" || strings.TrimSpace(c.InitialBalance.Currency) == "" {
+		return errors.New("campos obrigatorios ausentes")
+	}
+	if _, err := uuid.Parse(c.PlayerID); err != nil {
+		return errors.New("playerId invalido")
+	}
+	return nil
 }
 
 type transacaoHTTP struct {
