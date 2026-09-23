@@ -23,6 +23,31 @@ curl http://localhost:8081/health/ready
 ```
 O realm jungle-gaming é importado de deploy/keycloak/realm-export.json. Os clients locais são provider-a, provider-b e wallet-internal. Substitua os segredos em ambientes reais.
 
+### Papéis e autorização
+
+O token precisa conter um dos papéis do realm abaixo:
+
+- `provider:transactions`: permite enviar e consultar transações de apostas. O provider do token também precisa ser igual ao `providerId` da operação.
+- `internal:wallets`: permite criar, consultar, consultar o ledger e reconciliar carteiras.
+
+Nos clients locais, `provider-a` e `provider-b` são reconhecidos como providers e `wallet-internal` como client interno. Em produção, atribua explicitamente os papéis aos service accounts no Keycloak e remova os segredos de exemplo.
+
+Exemplo para obter um token de provider:
+
+```bash
+TOKEN=$(curl -sS -X POST \
+  http://localhost:8080/realms/jungle-gaming/protocol/openid-connect/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d client_id=provider-a \
+  -d client_secret=provider-a-secret \
+  -d grant_type=client_credentials | jq -r .access_token)
+
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8081/providers/provider-a/wagering/transactions/EXTERNAL_ID
+```
+
+O endpoint `/metrics` e os health checks são públicos; as demais rotas exigem token válido e papel compatível.
+
 ## Desenvolvimento
 ```bash
 gofmt -w .
