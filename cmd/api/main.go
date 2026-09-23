@@ -130,6 +130,22 @@ func main() {
 			}
 			writeJSON(w, 200, map[string]any{"transactionId": result.ID, "status": result.Status, "balance": moneyJSON(result.Balance), "idempotentReplay": result.Replay})
 		})
+		mux.HandleFunc("GET /wagering/transactions/{id}", func(w http.ResponseWriter, r *http.Request) {
+			result, err := db.BuscarTransacao(r.Context(), r.PathValue("id"))
+			if err != nil {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"transactionId": result.ID, "status": result.Status, "balance": moneyJSON(result.Balance), "failureCode": result.FailureCode})
+		})
+		mux.HandleFunc("GET /providers/{provider}/wagering/transactions/{external}", func(w http.ResponseWriter, r *http.Request) {
+			result, err := db.BuscarTransacaoExterna(r.Context(), r.PathValue("provider"), r.PathValue("external"))
+			if err != nil {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"transactionId": result.ID, "status": result.Status, "balance": moneyJSON(result.Balance), "failureCode": result.FailureCode})
+		})
 	}
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {

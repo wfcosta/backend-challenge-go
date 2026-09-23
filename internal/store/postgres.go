@@ -28,6 +28,36 @@ type ResultadoAposta struct {
 	FailureCode string
 }
 
+func (s *Store) BuscarTransacao(ctx context.Context, id string) (ResultadoAposta, error) {
+	var resultado ResultadoAposta
+	var minor int64
+	var currency string
+	err := s.pool.QueryRow(ctx, "SELECT id,status,result_balance_minor,currency,COALESCE(failure_code,'') FROM wagering_transactions WHERE id=$1", id).Scan(&resultado.ID, &resultado.Status, &minor, &currency, &resultado.FailureCode)
+	if err != nil {
+		return ResultadoAposta{}, errors.New("transacao nao encontrada")
+	}
+	resultado.Balance, err = domain.NewMoney(fmt.Sprintf("%d.%02d", minor/100, minor%100), currency)
+	if err != nil {
+		return ResultadoAposta{}, err
+	}
+	return resultado, nil
+}
+
+func (s *Store) BuscarTransacaoExterna(ctx context.Context, provedor, externo string) (ResultadoAposta, error) {
+	var resultado ResultadoAposta
+	var minor int64
+	var currency string
+	err := s.pool.QueryRow(ctx, "SELECT id,status,result_balance_minor,currency,COALESCE(failure_code,'') FROM wagering_transactions WHERE provider_id=$1 AND external_transaction_id=$2", provedor, externo).Scan(&resultado.ID, &resultado.Status, &minor, &currency, &resultado.FailureCode)
+	if err != nil {
+		return ResultadoAposta{}, errors.New("transacao nao encontrada")
+	}
+	resultado.Balance, err = domain.NewMoney(fmt.Sprintf("%d.%02d", minor/100, minor%100), currency)
+	if err != nil {
+		return ResultadoAposta{}, err
+	}
+	return resultado, nil
+}
+
 type Lancamento struct {
 	ID             string
 	TransactionID  string
