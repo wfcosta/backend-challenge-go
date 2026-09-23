@@ -262,6 +262,11 @@ func (s *Store) ProcessarAposta(ctx context.Context, input application.EntradaAp
 		return ResultadoAposta{}, err
 	}
 	defer tx.Rollback(ctx)
+	// Serializa a mesma chave antes de consultar e inserir, evitando corrida
+	// entre duas primeiras tentativas que ainda não possuem uma linha existente.
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", idempotencyKey); err != nil {
+		return ResultadoAposta{}, err
+	}
 
 	var existing ResultadoAposta
 	var minor int64

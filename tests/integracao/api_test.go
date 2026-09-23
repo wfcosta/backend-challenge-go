@@ -3,6 +3,7 @@ package integracao
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -118,7 +119,11 @@ func TestIdempotenciaConcorrenteProcessaUmaVez(t *testing.T) {
 	}
 	corpo := `{"providerId":"provider-a","externalTransactionId":"concorrente-` + playerID + `","walletId":"` + carteira.ID + `","playerId":"` + playerID + `","roundId":"round-1","gameId":"game-1","kind":"BET","money":{"amount":"80.00","currency":"BRL"}}`
 	const total = 10
-	resultados := make(chan int, total)
+	type resultadoHTTP struct {
+		status int
+		corpo  string
+	}
+	resultados := make(chan resultadoHTTP, total)
 	var grupo sync.WaitGroup
 	for i := 0; i < total; i++ {
 		grupo.Add(1)
@@ -130,19 +135,41 @@ func TestIdempotenciaConcorrenteProcessaUmaVez(t *testing.T) {
 			operacao.Header.Set("Content-Type", "application/json")
 			res, err := http.DefaultClient.Do(operacao)
 			if err != nil {
-				resultados <- 0
+				resultados <- resultadoHTTP{}
 				return
 			}
+			bytes, _ := io.ReadAll(res.Body)
 			res.Body.Close()
-			resultados <- res.StatusCode
+			resultados <- resultadoHTTP{status: res.StatusCode, corpo: string(bytes)}
 		}()
 	}
 	grupo.Wait()
 	close(resultados)
-	for status := range resultados {
-		if status != http.StatusOK {
-			t.Fatalf("status concorrente inesperado: %d", status)
+	for resultado := range resultados {
+		if resultado.status != http.StatusOK {
+			t.Fatalf("status concorrente inesperado: %d (%s)", resultado.status, resultado.corpo)
 		}
+	}
+	consulta, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:8081/wallets/"+carteira.ID, nil)
+	consulta.Header.Set("Authorization", "Bearer "+internal)
+	resposta, err = http.DefaultClient.Do(consulta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resposta.Body.Close()
+	if resposta.StatusCode != http.StatusOK {
+		t.Fatalf("consulta final da carteira: %d", resposta.StatusCode)
+	}
+	var final struct {
+		Balance struct {
+			Amount string `json:"amount"`
+		} `json:"balance"`
+	}
+	if err := json.NewDecoder(resposta.Body).Decode(&final); err != nil {
+		t.Fatal(err)
+	}
+	if final.Balance.Amount != "20.00" {
+		t.Fatalf("saldo final esperado 20.00, recebido %s", final.Balance.Amount)
 	}
 }
 
