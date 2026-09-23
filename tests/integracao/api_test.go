@@ -365,6 +365,10 @@ func TestFluxoBetEWin(t *testing.T) {
 	if win["status"] != "PROCESSED" {
 		t.Fatalf("WIN não processado: %#v", win)
 	}
+	loss := postar("fluxo-loss-"+playerID, "LOSS", "0.00")
+	if loss["status"] != "PROCESSED" {
+		t.Fatalf("LOSS não processado: %#v", loss)
+	}
 
 	consulta, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:8081/providers/provider-a/wagering/transactions/fluxo-win-"+playerID, nil)
 	consulta.Header.Set("Authorization", "Bearer "+provider)
