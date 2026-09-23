@@ -199,7 +199,7 @@ func (s *Store) ListLedger(ctx context.Context, walletID, cursor string, limit i
 		}
 		cursorID = string(valor)
 	}
-	query := "SELECT id,transaction_id,direction,amount_minor,balance_before_minor,balance_after_minor FROM ledger_entries WHERE wallet_id=$1 AND ($2='' OR id::text>$2) ORDER BY id LIMIT $3"
+	query := "SELECT l.id,l.transaction_id,l.direction,l.amount_minor,l.balance_before_minor,l.balance_after_minor,w.currency FROM ledger_entries l JOIN wallets w ON w.id=l.wallet_id WHERE l.wallet_id=$1 AND ($2='' OR l.id::text>$2) ORDER BY l.id LIMIT $3"
 	rows, err := s.pool.Query(ctx, query, walletID, cursorID, limit+1)
 	if err != nil {
 		return nil, "", err
@@ -213,11 +213,7 @@ func (s *Store) ListLedger(ctx context.Context, walletID, cursor string, limit i
 		if len(result) >= limit {
 			break
 		}
-		if err := rows.Scan(&item.ID, &item.TransactionID, &item.Direcao, &amount, &before, &after); err != nil {
-			return nil, "", err
-		}
-		err = s.pool.QueryRow(ctx, "SELECT currency FROM wallets WHERE id=$1", walletID).Scan(&currency)
-		if err != nil {
+		if err := rows.Scan(&item.ID, &item.TransactionID, &item.Direcao, &amount, &before, &after, &currency); err != nil {
 			return nil, "", err
 		}
 		item.Dinheiro, err = domain.NewMoney(fmt.Sprintf("%d.%02d", amount/100, amount%100), currency)
