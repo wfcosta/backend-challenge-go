@@ -1,5 +1,17 @@
 # Spec funcional — desafio backend Go
 
+## Leitura e validação
+
+Esta é a fonte do comportamento externo da API. Os nomes em inglês são mantidos porque fazem parte do contrato (`providerId`, `walletId`, `BET` etc.). Os exemplos operacionais estão no `README.md`, a arquitetura está em `ARCHITECTURE.md` e o contrato formal está em `docs/openapi.yaml`.
+
+Para validar os cenários com infraestrutura real:
+
+```bash
+docker compose up --build -d
+INTEGRATION=true go test ./tests/integracao -v
+docker compose down
+```
+
 ## Objetivo
 Serviço distribuído para processar apostas por HTTP e SQS, mantendo saldo e ledger corretos sob concorrência, entrega at-least-once, reinícios e falhas.
 

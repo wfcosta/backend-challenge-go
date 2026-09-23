@@ -262,3 +262,15 @@ docker compose down
 ```
 
 Antes de marcar o projeto como pronto, conferir: nenhum teste ignorado sem justificativa; nenhum mock substitui a integração real; nenhum endpoint de negócio sem auth; nenhuma operação financeira sem ledger/outbox transacional; nenhum saldo negativo/duplicado; documentação reproduzível a partir de checkout limpo.
+
+## Execução reproduzível
+
+```bash
+docker compose up --build -d
+INTEGRATION=true go test ./tests/integracao -v
+go test -race ./...
+go vet ./...
+docker compose down
+```
+
+Cada tarefa deve ter teste, implementação, validação local e documentação atualizada. O CI executa o mesmo ciclo em ambiente limpo.

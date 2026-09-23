@@ -2,6 +2,21 @@
 
 > Documento de planejamento para implementação incremental com Codex. A `spec.md` é a fonte funcional; este documento define como construir, testar e operar.
 
+## Como reproduzir a implementação
+
+```bash
+gofmt -w .
+go test ./...
+go test -race ./...
+go vet ./...
+docker compose config --quiet
+docker compose up --build -d
+INTEGRATION=true go test ./tests/integracao -v
+docker compose down
+```
+
+As migrations em `migrations/` são aplicadas pelo serviço `migrate`. O CI executa a mesma validação em ambiente limpo.
+
 ## 1. Resultado esperado
 Entregar um projeto Go executável por Docker Compose, com API HTTP autenticada, consumidor SQS, PostgreSQL, Keycloak, LocalStack, migrations, transactional outbox, workers, observabilidade, testes unitários, testes de integração e README operacional.
 
