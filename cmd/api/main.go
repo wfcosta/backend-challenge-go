@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -72,6 +73,16 @@ func main() {
 		})
 		mux.HandleFunc("GET /wallets/{id}/ledger", func(w http.ResponseWriter, r *http.Request) {
 			limite := 50
+			if valor := r.URL.Query().Get("limit"); valor != "" {
+				if _, err := fmt.Sscanf(valor, "%d", &limite); err != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limit invalido"})
+					return
+				}
+			}
+			if limite < 1 || limite > 100 {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limit deve estar entre 1 e 100"})
+				return
+			}
 			lancamentos, proximo, err := db.ListLedger(r.Context(), r.PathValue("id"), r.URL.Query().Get("cursor"), limite)
 			if err != nil {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
