@@ -444,6 +444,9 @@ func (s *Store) Resolver(ctx context.Context, transactionID string) error {
 	if _, err = tx.Exec(ctx, "INSERT INTO ledger_entries(wallet_id,transaction_id,direction,amount_minor,balance_before_minor,balance_after_minor) VALUES($1,$2,$3,$4,$5,$6)", walletID, transactionID, direction, amount, balance, next); err != nil {
 		return err
 	}
+	if err = inserirEvento(ctx, tx, eventos.NovoEnvelope("WalletBalanceChanged", walletID, transactionID, map[string]any{"walletId": walletID, "transactionId": transactionID, "direction": direction, "money": map[string]string{"amount": fmt.Sprintf("%d.%02d", amount/100, amount%100), "currency": currency}, "balanceBefore": map[string]string{"amount": fmt.Sprintf("%d.%02d", balance/100, balance%100), "currency": currency}, "balanceAfter": map[string]string{"amount": fmt.Sprintf("%d.%02d", next/100, next%100), "currency": currency}, "walletVersion": nextVersion})); err != nil {
+		return err
+	}
 	if err = inserirEvento(ctx, tx, eventos.NovoEnvelope("WagerTransactionProcessed", transactionID, transactionID, map[string]any{"transactionId": transactionID, "status": "PROCESSED", "kind": kind})); err != nil {
 		return err
 	}

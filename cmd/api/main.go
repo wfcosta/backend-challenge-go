@@ -150,7 +150,13 @@ func main() {
 					writeJSON(w, 409, map[string]string{"error": err.Error()})
 					return
 				}
-				writeJSON(w, 422, map[string]string{"error": err.Error()})
+				status := http.StatusUnprocessableEntity
+				if errors.Is(err, store.ErrWalletNotFound) {
+					status = http.StatusNotFound
+				} else if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+					status = http.StatusServiceUnavailable
+				}
+				writeJSON(w, status, map[string]string{"error": err.Error()})
 				return
 			}
 			writeJSON(w, 200, map[string]any{"transactionId": result.ID, "status": result.Status, "balance": moneyJSON(result.Balance), "idempotentReplay": result.Replay})
