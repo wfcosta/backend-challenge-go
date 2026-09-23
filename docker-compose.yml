@@ -26,3 +26,10 @@ services:
       SERVICES: sqs
       AWS_DEFAULT_REGION: us-east-1
     ports: ["4566:4566"]
+  migrate:
+    image: migrate/migrate:v4.17.1
+    volumes:
+      - ./migrations:/migrations:ro
+    command: ["-path=/migrations", "-database=postgres://orchestration:orchestration@postgres:5432/orchestration?sslmode=disable", "up"]
+    depends_on:
+      postgres: {condition: service_healthy}
