@@ -15,6 +15,7 @@ import (
 	"github.com/wfcosta/backend-challenge-go/internal/application"
 	"github.com/wfcosta/backend-challenge-go/internal/auth"
 	"github.com/wfcosta/backend-challenge-go/internal/domain"
+	"github.com/wfcosta/backend-challenge-go/internal/observabilidade"
 	"github.com/wfcosta/backend-challenge-go/internal/store"
 	"github.com/wfcosta/backend-challenge-go/internal/worker"
 	"go.uber.org/fx"
@@ -26,6 +27,8 @@ func main() {
 		addr = ":8081"
 	}
 	mux := http.NewServeMux()
+	metricas := &observabilidade.Metricas{}
+	mux.HandleFunc("GET /metrics", metricas.Handler)
 	databaseURL := os.Getenv("DATABASE_URL")
 	var db *store.Store
 	if databaseURL != "" {
@@ -161,7 +164,7 @@ func main() {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
-	var handler http.Handler = mux
+	var handler http.Handler = metricas.Middleware(mux)
 	issuer := os.Getenv("OIDC_ISSUER_URL")
 	if issuer != "" {
 		audiencia := os.Getenv("OIDC_AUDIENCE")
