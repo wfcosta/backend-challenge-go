@@ -12,6 +12,24 @@ type contextoChave string
 
 const Identidade contextoChave = "identidade"
 
+func Provedor(ctx context.Context) string {
+	token, ok := ctx.Value(Identidade).(*oidc.IDToken)
+	if !ok {
+		return ""
+	}
+	var claims map[string]any
+	if token.Claims(&claims) != nil {
+		return ""
+	}
+	if valor, ok := claims["provider_id"].(string); ok && valor != "" {
+		return valor
+	}
+	if valor, ok := claims["azp"].(string); ok {
+		return valor
+	}
+	return ""
+}
+
 type Autenticador struct {
 	issuer      string
 	audience    string

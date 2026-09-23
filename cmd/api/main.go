@@ -113,6 +113,10 @@ func main() {
 				return
 			}
 			providerID, _ := raw["providerId"].(string)
+			if autorizado := auth.Provedor(r.Context()); autorizado != "" && autorizado != providerID {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "provider nao autorizado"})
+				return
+			}
 			externalID, _ := raw["externalTransactionId"].(string)
 			playerID, _ := raw["playerId"].(string)
 			walletID, _ := raw["walletId"].(string)
@@ -147,6 +151,10 @@ func main() {
 			writeJSON(w, http.StatusOK, map[string]any{"transactionId": result.ID, "status": result.Status, "balance": moneyJSON(result.Balance), "failureCode": result.FailureCode})
 		})
 		mux.HandleFunc("GET /providers/{provider}/wagering/transactions/{external}", func(w http.ResponseWriter, r *http.Request) {
+			if autorizado := auth.Provedor(r.Context()); autorizado != "" && autorizado != r.PathValue("provider") {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "provider nao autorizado"})
+				return
+			}
 			result, err := db.BuscarTransacaoExterna(r.Context(), r.PathValue("provider"), r.PathValue("external"))
 			if err != nil {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
