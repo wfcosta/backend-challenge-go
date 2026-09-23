@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+
 	adaptadorsqs "github.com/wfcosta/backend-challenge-go/internal/adapters/sqs"
 	"github.com/wfcosta/backend-challenge-go/internal/application"
 	"github.com/wfcosta/backend-challenge-go/internal/auth"
@@ -120,33 +122,29 @@ func main() {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing Idempotency-Key"})
 				return
 			}
-			var raw map[string]any
-			if json.NewDecoder(r.Body).Decode(&raw) != nil {
+			var raw transacaoHTTP
+			decodificador := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+			decodificador.DisallowUnknownFields()
+			if decodificador.Decode(&raw) != nil {
 				writeJSON(w, 400, map[string]string{"error": "invalid request"})
 				return
 			}
-			providerID, _ := raw["providerId"].(string)
+			if err := raw.Validar(); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			providerID := raw.ProviderID
 			autorizado := auth.Provedor(r.Context())
 			if autorizado == "" || !auth.EhProvider(r.Context()) || autorizado != providerID {
 				writeJSON(w, http.StatusForbidden, map[string]string{"error": "provider nao autorizado"})
 				return
 			}
-			externalID, _ := raw["externalTransactionId"].(string)
-			playerID, _ := raw["playerId"].(string)
-			walletID, _ := raw["walletId"].(string)
-			roundID, _ := raw["roundId"].(string)
-			gameID, _ := raw["gameId"].(string)
-			kind, _ := raw["kind"].(string)
-			referenceExternalID, _ := raw["referenceExternalId"].(string)
-			dinheiro, _ := raw["money"].(map[string]any)
-			amount, _ := dinheiro["amount"].(string)
-			currency, _ := dinheiro["currency"].(string)
-			money, err := domain.NewMoney(amount, currency)
+			money, err := domain.NewMoney(raw.Money.Amount, raw.Money.Currency)
 			if err != nil {
 				writeJSON(w, 400, map[string]string{"error": err.Error()})
 				return
 			}
-			result, err := db.ProcessarAposta(r.Context(), application.EntradaAposta{ProviderID: providerID, ExternalID: externalID, PlayerID: playerID, WalletID: walletID, RoundID: roundID, GameID: gameID, Kind: kind, Money: money, ReferenceExternalID: referenceExternalID}, key)
+			result, err := db.ProcessarAposta(r.Context(), application.EntradaAposta{ProviderID: providerID, ExternalID: raw.ExternalTransactionID, PlayerID: raw.PlayerID, WalletID: raw.WalletID, RoundID: raw.RoundID, GameID: raw.GameID, Kind: raw.Kind, Money: money, ReferenceExternalID: raw.ReferenceExternalID}, key)
 			if err != nil {
 				if errors.Is(err, application.ErroConflitoIdempotencia) {
 					writeJSON(w, 409, map[string]string{"error": err.Error()})
@@ -294,6 +292,38 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+type dinheiroHTTP struct {
+	Amount   string `json:"amount"`
+	Currency string `json:"currency"`
+}
+
+type transacaoHTTP struct {
+	ProviderID            string       `json:"providerId"`
+	ExternalTransactionID string       `json:"externalTransactionId"`
+	WalletID              string       `json:"walletId"`
+	PlayerID              string       `json:"playerId"`
+	RoundID               string       `json:"roundId"`
+	GameID                string       `json:"gameId"`
+	Kind                  string       `json:"kind"`
+	ReferenceExternalID   string       `json:"referenceExternalId,omitempty"`
+	Money                 dinheiroHTTP `json:"money"`
+}
+
+func (t transacaoHTTP) Validar() error {
+	for nome, valor := range map[string]string{"providerId": t.ProviderID, "externalTransactionId": t.ExternalTransactionID, "walletId": t.WalletID, "playerId": t.PlayerID, "roundId": t.RoundID, "gameId": t.GameID, "kind": t.Kind, "money.amount": t.Money.Amount, "money.currency": t.Money.Currency} {
+		if strings.TrimSpace(valor) == "" {
+			return fmt.Errorf("%s obrigatorio", nome)
+		}
+	}
+	if _, err := uuid.Parse(t.WalletID); err != nil {
+		return errors.New("walletId invalido")
+	}
+	if _, err := uuid.Parse(t.PlayerID); err != nil {
+		return errors.New("playerId invalido")
+	}
+	return nil
 }
 
 func moneyJSON(m domain.Money) map[string]string {
