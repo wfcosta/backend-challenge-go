@@ -68,6 +68,21 @@ func main() {
 				writeJSON(w, http.StatusOK, lancamentos)
 			}
 		})
+		mux.HandleFunc("POST /wallets/{id}/reconciliation", func(w http.ResponseWriter, r *http.Request) {
+			result, err := db.ConciliarCarteira(r.Context(), r.PathValue("id"))
+			if err != nil {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"walletId":          result.CarteiraID,
+				"storedBalance":     moneyJSON(result.SaldoArmazenado),
+				"calculatedBalance": moneyJSON(result.SaldoCalculado),
+				"difference":        moneyJSON(result.Diferenca),
+				"consistent":        result.Consistente,
+				"checkedEntries":    result.LancamentosVerificados,
+			})
+		})
 		mux.HandleFunc("POST /wagering/transactions", func(w http.ResponseWriter, r *http.Request) {
 			key := r.Header.Get("Idempotency-Key")
 			if key == "" {

@@ -37,6 +37,15 @@ type Lancamento struct {
 	SaldoPosterior domain.Money
 }
 
+type ResultadoConciliacao struct {
+	CarteiraID             string
+	SaldoArmazenado        domain.Money
+	SaldoCalculado         domain.Money
+	Diferenca              domain.Money
+	Consistente            bool
+	LancamentosVerificados int
+}
+
 type Store struct{ pool *pgxpool.Pool }
 
 func New(ctx context.Context, databaseURL string) (*Store, error) {
@@ -126,6 +135,32 @@ func (s *Store) ListLedger(ctx context.Context, walletID string, limit int) ([]L
 		result = append(result, item)
 	}
 	return result, rows.Err()
+}
+
+func (s *Store) ConciliarCarteira(ctx context.Context, walletID string) (ResultadoConciliacao, error) {
+	var moeda string
+	var armazenado int64
+	if err := s.pool.QueryRow(ctx, "SELECT currency,balance_minor FROM wallets WHERE id=$1", walletID).Scan(&moeda, &armazenado); err != nil {
+		return ResultadoConciliacao{}, ErrWalletNotFound
+	}
+	var calculado int64
+	var quantidade int
+	if err := s.pool.QueryRow(ctx, "SELECT COALESCE(SUM(CASE WHEN direction='CREDIT' THEN amount_minor ELSE -amount_minor END),0),COUNT(*) FROM ledger_entries WHERE wallet_id=$1", walletID).Scan(&calculado, &quantidade); err != nil {
+		return ResultadoConciliacao{}, err
+	}
+	saldo, err := domain.NewMoney(fmt.Sprintf("%d.%02d", armazenado/100, armazenado%100), moeda)
+	if err != nil {
+		return ResultadoConciliacao{}, err
+	}
+	reconstruido, err := domain.NewMoney(fmt.Sprintf("%d.%02d", calculado/100, calculado%100), moeda)
+	if err != nil {
+		return ResultadoConciliacao{}, err
+	}
+	diferenca, err := saldo.Sub(reconstruido)
+	if err != nil {
+		diferenca = saldo.Negate()
+	}
+	return ResultadoConciliacao{CarteiraID: walletID, SaldoArmazenado: saldo, SaldoCalculado: reconstruido, Diferenca: diferenca, Consistente: diferenca.IsZero(), LancamentosVerificados: quantidade}, nil
 }
 
 func (s *Store) ProcessarAposta(ctx context.Context, input application.EntradaAposta, idempotencyKey string) (ResultadoAposta, error) {
