@@ -296,6 +296,74 @@ func TestLedgerEReconcilacaoDaCarteira(t *testing.T) {
 	}
 }
 
+func TestFluxoBetEWin(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "true" {
+		t.Skip("defina INTEGRATION=true")
+	}
+	internal := obterToken(t, "wallet-internal", "internal-secret")
+	provider := obterToken(t, "provider-a", "provider-a-secret")
+	playerID := "00000000-0000-0000-0000-" + fmt.Sprintf("%012d", (time.Now().UnixNano()+3)%1000000000000)
+	criar := `{"playerId":"` + playerID + `","initialBalance":{"amount":"100.00","currency":"BRL"}}`
+	req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8081/wallets", strings.NewReader(criar))
+	req.Header.Set("Authorization", "Bearer "+internal)
+	req.Header.Set("Content-Type", "application/json")
+	resposta, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var carteira struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resposta.Body).Decode(&carteira); err != nil {
+		resposta.Body.Close()
+		t.Fatal(err)
+	}
+	resposta.Body.Close()
+	if resposta.StatusCode != http.StatusCreated {
+		t.Fatalf("criação da carteira: %d", resposta.StatusCode)
+	}
+
+	postar := func(externo, tipo, valor string) map[string]any {
+		corpo := `{"providerId":"provider-a","externalTransactionId":"` + externo + `","walletId":"` + carteira.ID + `","playerId":"` + playerID + `","roundId":"round-fluxo","gameId":"game-fluxo","kind":"` + tipo + `","money":{"amount":"` + valor + `","currency":"BRL"}}`
+		operacao, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8081/wagering/transactions", strings.NewReader(corpo))
+		operacao.Header.Set("Authorization", "Bearer "+provider)
+		operacao.Header.Set("Idempotency-Key", externo)
+		operacao.Header.Set("Content-Type", "application/json")
+		res, chamadaErr := http.DefaultClient.Do(operacao)
+		if chamadaErr != nil {
+			t.Fatal(chamadaErr)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status %d", tipo, res.StatusCode)
+		}
+		var retorno map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&retorno); err != nil {
+			t.Fatal(err)
+		}
+		return retorno
+	}
+	bet := postar("fluxo-bet-"+playerID, "BET", "20.00")
+	if bet["status"] != "PROCESSED" {
+		t.Fatalf("BET não processado: %#v", bet)
+	}
+	win := postar("fluxo-win-"+playerID, "WIN", "30.00")
+	if win["status"] != "PROCESSED" {
+		t.Fatalf("WIN não processado: %#v", win)
+	}
+
+	consulta, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:8081/providers/provider-a/wagering/transactions/fluxo-win-"+playerID, nil)
+	consulta.Header.Set("Authorization", "Bearer "+provider)
+	resposta, err = http.DefaultClient.Do(consulta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resposta.Body.Close()
+	if resposta.StatusCode != http.StatusOK {
+		t.Fatalf("consulta WIN: %d", resposta.StatusCode)
+	}
+}
+
 func obterToken(t *testing.T, cliente, segredo string) string {
 	t.Helper()
 	form := url.Values{"client_id": {cliente}, "client_secret": {segredo}, "grant_type": {"client_credentials"}}
