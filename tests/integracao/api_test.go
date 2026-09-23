@@ -1,8 +1,11 @@
 package integracao
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -26,5 +29,38 @@ func TestAPIComCompose(t *testing.T) {
 	resposta.Body.Close()
 	if resposta.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("auth esperada: %d", resposta.StatusCode)
+	}
+}
+
+func TestProviderNaoAcessaOutroProvider(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "true" {
+		t.Skip("defina INTEGRATION=true")
+	}
+	form := url.Values{"client_id": {"provider-a"}, "client_secret": {"provider-a-secret"}, "grant_type": {"client_credentials"}}
+	resposta, err := http.Post("http://127.0.0.1:8080/realms/jungle-gaming/protocol/openid-connect/token", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var token map[string]any
+	if err := json.NewDecoder(resposta.Body).Decode(&token); err != nil {
+		t.Fatal(err)
+	}
+	resposta.Body.Close()
+	accessToken, _ := token["access_token"].(string)
+	if accessToken == "" {
+		t.Fatal("token nao obtido")
+	}
+	corpo := `{"providerId":"provider-b","externalTransactionId":"isolamento-1","walletId":"00000000-0000-0000-0000-000000000001","playerId":"00000000-0000-0000-0000-000000000002","roundId":"r","gameId":"g","kind":"LOSS","money":{"amount":"1.00","currency":"BRL"}}`
+	req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8081/wagering/transactions", strings.NewReader(corpo))
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Idempotency-Key", "provider-b:isolamento-1")
+	req.Header.Set("Content-Type", "application/json")
+	resposta, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resposta.Body.Close()
+	if resposta.StatusCode != http.StatusForbidden {
+		t.Fatalf("status esperado 403, recebido %d", resposta.StatusCode)
 	}
 }
