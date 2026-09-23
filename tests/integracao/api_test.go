@@ -412,6 +412,19 @@ func TestFluxoBetEWin(t *testing.T) {
 	if bet["status"] != "PROCESSED" {
 		t.Fatalf("BET não processado: %#v", bet)
 	}
+	conflitoCorpo := `{"providerId":"provider-a","externalTransactionId":"fluxo-bet-` + playerID + `","walletId":"` + carteira.ID + `","playerId":"` + playerID + `","roundId":"round-fluxo","gameId":"game-fluxo","kind":"BET","money":{"amount":"21.00","currency":"BRL"}}`
+	conflito, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8081/wagering/transactions", strings.NewReader(conflitoCorpo))
+	conflito.Header.Set("Authorization", "Bearer "+provider)
+	conflito.Header.Set("Idempotency-Key", "fluxo-bet-"+playerID)
+	conflito.Header.Set("Content-Type", "application/json")
+	respostaConflito, err := http.DefaultClient.Do(conflito)
+	if err != nil {
+		t.Fatal(err)
+	}
+	respostaConflito.Body.Close()
+	if respostaConflito.StatusCode != http.StatusConflict {
+		t.Fatalf("conflito de idempotência: %d", respostaConflito.StatusCode)
+	}
 	win := postar("fluxo-win-"+playerID, "WIN", "30.00")
 	if win["status"] != "PROCESSED" {
 		t.Fatalf("WIN não processado: %#v", win)
@@ -430,6 +443,44 @@ func TestFluxoBetEWin(t *testing.T) {
 	defer resposta.Body.Close()
 	if resposta.StatusCode != http.StatusOK {
 		t.Fatalf("consulta WIN: %d", resposta.StatusCode)
+	}
+}
+
+func TestTransacaoComMoedaDivergente(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "true" {
+		t.Skip("defina INTEGRATION=true")
+	}
+	internal := obterToken(t, "wallet-internal", "internal-secret")
+	provider := obterToken(t, "provider-a", "provider-a-secret")
+	playerID := "00000000-0000-0000-0000-" + fmt.Sprintf("%012d", (time.Now().UnixNano()+6)%1000000000000)
+	criar := `{"playerId":"` + playerID + `","initialBalance":{"amount":"10.00","currency":"BRL"}}`
+	req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8081/wallets", strings.NewReader(criar))
+	req.Header.Set("Authorization", "Bearer "+internal)
+	req.Header.Set("Content-Type", "application/json")
+	resposta, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var carteira struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resposta.Body).Decode(&carteira); err != nil {
+		resposta.Body.Close()
+		t.Fatal(err)
+	}
+	resposta.Body.Close()
+	corpo := `{"providerId":"provider-a","externalTransactionId":"moeda-` + playerID + `","walletId":"` + carteira.ID + `","playerId":"` + playerID + `","roundId":"round-moeda","gameId":"game-moeda","kind":"BET","money":{"amount":"1.00","currency":"USD"}}`
+	operacao, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8081/wagering/transactions", strings.NewReader(corpo))
+	operacao.Header.Set("Authorization", "Bearer "+provider)
+	operacao.Header.Set("Idempotency-Key", "moeda-"+playerID)
+	operacao.Header.Set("Content-Type", "application/json")
+	resposta, err = http.DefaultClient.Do(operacao)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resposta.Body.Close()
+	if resposta.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("moeda divergente: status esperado 422, recebido %d", resposta.StatusCode)
 	}
 }
 
