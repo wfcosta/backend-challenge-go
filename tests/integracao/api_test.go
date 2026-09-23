@@ -72,4 +72,18 @@ func TestProviderNaoAcessaOutroProvider(t *testing.T) {
 	if resposta.StatusCode != http.StatusForbidden {
 		t.Fatalf("status esperado 403, recebido %d", resposta.StatusCode)
 	}
+
+	consulta, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:8081/providers/provider-b/wagering/transactions/isolamento-1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	consulta.Header.Set("Authorization", "Bearer "+accessToken)
+	resposta, err = http.DefaultClient.Do(consulta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resposta.Body.Close()
+	if resposta.StatusCode != http.StatusForbidden {
+		t.Fatalf("consulta: status esperado 403, recebido %d", resposta.StatusCode)
+	}
 }
