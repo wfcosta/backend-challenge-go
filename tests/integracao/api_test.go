@@ -418,6 +418,73 @@ func TestFluxoRefundComReferencia(t *testing.T) {
 	}
 }
 
+func TestFluxoRollbackDeWin(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "true" {
+		t.Skip("defina INTEGRATION=true")
+	}
+	internal := obterToken(t, "wallet-internal", "internal-secret")
+	provider := obterToken(t, "provider-a", "provider-a-secret")
+	playerID := "00000000-0000-0000-0000-" + fmt.Sprintf("%012d", (time.Now().UnixNano()+5)%1000000000000)
+	criar := `{"playerId":"` + playerID + `","initialBalance":{"amount":"100.00","currency":"BRL"}}`
+	req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8081/wallets", strings.NewReader(criar))
+	req.Header.Set("Authorization", "Bearer "+internal)
+	req.Header.Set("Content-Type", "application/json")
+	resposta, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var carteira struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resposta.Body).Decode(&carteira); err != nil {
+		resposta.Body.Close()
+		t.Fatal(err)
+	}
+	resposta.Body.Close()
+	if resposta.StatusCode != http.StatusCreated {
+		t.Fatalf("criação da carteira: %d", resposta.StatusCode)
+	}
+	enviar := func(externo, tipo, valor, referencia string) int {
+		corpo := `{"providerId":"provider-a","externalTransactionId":"` + externo + `","walletId":"` + carteira.ID + `","playerId":"` + playerID + `","roundId":"round-rollback","gameId":"game-rollback","kind":"` + tipo + `","referenceExternalId":"` + referencia + `","money":{"amount":"` + valor + `","currency":"BRL"}}`
+		operacao, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8081/wagering/transactions", strings.NewReader(corpo))
+		operacao.Header.Set("Authorization", "Bearer "+provider)
+		operacao.Header.Set("Idempotency-Key", externo)
+		operacao.Header.Set("Content-Type", "application/json")
+		res, chamadaErr := http.DefaultClient.Do(operacao)
+		if chamadaErr != nil {
+			t.Fatal(chamadaErr)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	original := "rollback-win-" + playerID
+	if status := enviar(original, "WIN", "30.00", ""); status != http.StatusOK {
+		t.Fatalf("WIN: %d", status)
+	}
+	if status := enviar("rollback-"+playerID, "ROLLBACK", "30.00", original); status != http.StatusOK {
+		t.Fatalf("ROLLBACK: %d", status)
+	}
+
+	consulta, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:8081/wallets/"+carteira.ID, nil)
+	consulta.Header.Set("Authorization", "Bearer "+internal)
+	resposta, err = http.DefaultClient.Do(consulta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resposta.Body.Close()
+	var saldo struct {
+		Balance struct {
+			Amount string `json:"amount"`
+		} `json:"balance"`
+	}
+	if err := json.NewDecoder(resposta.Body).Decode(&saldo); err != nil {
+		t.Fatal(err)
+	}
+	if saldo.Balance.Amount != "100.00" {
+		t.Fatalf("saldo após rollback esperado 100.00, recebido %s", saldo.Balance.Amount)
+	}
+}
+
 func obterToken(t *testing.T, cliente, segredo string) string {
 	t.Helper()
 	form := url.Values{"client_id": {cliente}, "client_secret": {segredo}, "grant_type": {"client_credentials"}}
