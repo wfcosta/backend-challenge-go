@@ -43,6 +43,18 @@ func TestAPIComCompose(t *testing.T) {
 	if resposta.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("auth esperada: %d", resposta.StatusCode)
 	}
+	token := obterToken(t, "provider-a", "provider-a-secret")
+	req, _ := http.NewRequest(http.MethodPost, base+"/wagering/transactions", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resposta, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resposta.Body.Close()
+	if resposta.StatusCode != http.StatusBadRequest {
+		t.Fatalf("idempotência obrigatória: %d", resposta.StatusCode)
+	}
 }
 
 func TestProviderNaoAcessaOutroProvider(t *testing.T) {
