@@ -422,8 +422,26 @@ func TestFluxoRefundComReferencia(t *testing.T) {
 		return res.StatusCode
 	}
 	original := "refund-original-" + playerID
-	if status := enviar("refund-pendente-"+playerID, "REFUND", "20.00", "referencia-que-ainda-nao-existe"); status != http.StatusOK {
+	pendente := "refund-pendente-" + playerID
+	if status := enviar(pendente, "REFUND", "20.00", "referencia-que-ainda-nao-existe"); status != http.StatusOK {
 		t.Fatalf("REFUND pendente: %d", status)
+	}
+	consultaPendente, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:8081/providers/provider-a/wagering/transactions/"+pendente, nil)
+	consultaPendente.Header.Set("Authorization", "Bearer "+provider)
+	resposta, err = http.DefaultClient.Do(consultaPendente)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var estado struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(resposta.Body).Decode(&estado); err != nil {
+		resposta.Body.Close()
+		t.Fatal(err)
+	}
+	resposta.Body.Close()
+	if estado.Status != "PENDING_REFERENCE" {
+		t.Fatalf("estado pendente esperado, recebido %s", estado.Status)
 	}
 	if status := enviar(original, "BET", "20.00", ""); status != http.StatusOK {
 		t.Fatalf("BET: %d", status)
