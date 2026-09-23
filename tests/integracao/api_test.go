@@ -404,6 +404,9 @@ func TestFluxoRefundComReferencia(t *testing.T) {
 		return res.StatusCode
 	}
 	original := "refund-original-" + playerID
+	if status := enviar("refund-pendente-"+playerID, "REFUND", "20.00", "referencia-que-ainda-nao-existe"); status != http.StatusOK {
+		t.Fatalf("REFUND pendente: %d", status)
+	}
 	if status := enviar(original, "BET", "20.00", ""); status != http.StatusOK {
 		t.Fatalf("BET: %d", status)
 	}
