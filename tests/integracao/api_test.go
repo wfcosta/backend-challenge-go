@@ -47,6 +47,16 @@ func TestAPIComCompose(t *testing.T) {
 	if resposta.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("auth esperada: %d", resposta.StatusCode)
 	}
+	reqInvalido, _ := http.NewRequest(http.MethodGet, base+"/wallets/00000000-0000-0000-0000-000000000001", nil)
+	reqInvalido.Header.Set("Authorization", "Bearer token-invalido")
+	resposta, err = http.DefaultClient.Do(reqInvalido)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resposta.Body.Close()
+	if resposta.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("token inválido: %d", resposta.StatusCode)
+	}
 	token := obterToken(t, "provider-a", "provider-a-secret")
 	req, _ := http.NewRequest(http.MethodPost, base+"/wagering/transactions", strings.NewReader(`{}`))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -93,6 +103,29 @@ func TestFilasSQSProvisionadas(t *testing.T) {
 		if !strings.Contains(texto, fila) {
 			t.Fatalf("fila SQS ausente: %s", fila)
 		}
+	}
+}
+
+func TestMetricasECorrelationID(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "true" {
+		t.Skip("defina INTEGRATION=true")
+	}
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:8081/metrics", nil)
+	req.Header.Set("X-Correlation-ID", "correlacao-teste")
+	resposta, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resposta.Body.Close()
+	if resposta.StatusCode != http.StatusOK || resposta.Header.Get("Content-Type") == "" {
+		t.Fatalf("endpoint de métricas inválido: status=%d content-type=%q", resposta.StatusCode, resposta.Header.Get("Content-Type"))
+	}
+	conteudo, err := io.ReadAll(resposta.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(conteudo), "apostas_requisicoes_total") {
+		t.Fatal("métrica de requisições ausente")
 	}
 }
 
