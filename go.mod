@@ -4,6 +4,7 @@ go 1.27
 
 require (
 	github.com/coreos/go-oidc/v3 v3.11.0
+	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.2
 )
 
