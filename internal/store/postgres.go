@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -109,11 +110,19 @@ func (s *Store) Registrar(ctx context.Context, consumidor, mensagemID, corpo str
 	hash := sha256.Sum256([]byte(corpo))
 	valor := hex.EncodeToString(hash[:])
 	var inserido bool
-	err := s.pool.QueryRow(ctx, "INSERT INTO inbox_messages(consumer_name,message_id,payload_hash) VALUES($1,$2,$3) ON CONFLICT (consumer_name,message_id) DO UPDATE SET payload_hash=inbox_messages.payload_hash RETURNING payload_hash=$3", consumidor, mensagemID, valor).Scan(&inserido)
-	if err != nil {
+	err := s.pool.QueryRow(ctx, "INSERT INTO inbox_messages(consumer_name,message_id,payload_hash) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING true", consumidor, mensagemID, valor).Scan(&inserido)
+	if err == nil {
+		return inserido, nil
+	}
+	var concluida *time.Time
+	var hashArmazenado string
+	if err = s.pool.QueryRow(ctx, "SELECT payload_hash,completed_at FROM inbox_messages WHERE consumer_name=$1 AND message_id=$2", consumidor, mensagemID).Scan(&hashArmazenado, &concluida); err != nil {
 		return false, err
 	}
-	return inserido, nil
+	if hashArmazenado != valor {
+		return false, errors.New("mensagem SQS duplicada com payload divergente")
+	}
+	return concluida == nil, nil
 }
 
 func (s *Store) Concluir(ctx context.Context, consumidor, mensagemID string) error {
