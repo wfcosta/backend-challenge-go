@@ -71,7 +71,8 @@ func main() {
 		})
 		mux.HandleFunc("GET /wallets/{id}/ledger", func(w http.ResponseWriter, r *http.Request) {
 			limite := 50
-			if lancamentos, err := db.ListLedger(r.Context(), r.PathValue("id"), limite); err != nil {
+			lancamentos, proximo, err := db.ListLedger(r.Context(), r.PathValue("id"), r.URL.Query().Get("cursor"), limite)
+			if err != nil {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 			} else {
 				resposta := make([]map[string]any, 0, len(lancamentos))
@@ -82,7 +83,7 @@ func main() {
 						"balanceAfter": moneyJSON(item.SaldoPosterior),
 					})
 				}
-				writeJSON(w, http.StatusOK, resposta)
+				writeJSON(w, http.StatusOK, map[string]any{"items": resposta, "nextCursor": proximo})
 			}
 		})
 		mux.HandleFunc("POST /wallets/{id}/reconciliation", func(w http.ResponseWriter, r *http.Request) {
