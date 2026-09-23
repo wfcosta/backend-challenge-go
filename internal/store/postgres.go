@@ -262,15 +262,27 @@ func (s *Store) ConciliarCarteira(ctx context.Context, walletID string) (Resulta
 }
 
 func (s *Store) ProcessarAposta(ctx context.Context, input application.EntradaAposta, idempotencyKey string) (ResultadoAposta, error) {
-	if err := application.ValidarAposta(input); err != nil {
-		return ResultadoAposta{}, err
-	}
-	hash := application.HashPayload(input)
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return ResultadoAposta{}, err
 	}
 	defer tx.Rollback(ctx)
+	resultado, err := s.processarApostaNaTransacao(ctx, tx, input, idempotencyKey)
+	if err != nil {
+		return ResultadoAposta{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ResultadoAposta{}, err
+	}
+	return resultado, nil
+}
+
+func (s *Store) processarApostaNaTransacao(ctx context.Context, tx pgx.Tx, input application.EntradaAposta, idempotencyKey string) (ResultadoAposta, error) {
+	if err := application.ValidarAposta(input); err != nil {
+		return ResultadoAposta{}, err
+	}
+	hash := application.HashPayload(input)
+	var err error
 	// Serializa a mesma chave antes de consultar e inserir, evitando corrida
 	// entre duas primeiras tentativas que ainda não possuem uma linha existente.
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", idempotencyKey); err != nil {
@@ -317,9 +329,6 @@ func (s *Store) ProcessarAposta(ctx context.Context, input application.EntradaAp
 					return ResultadoAposta{}, err
 				}
 				if err = inserirEvento(ctx, tx, eventos.NovoEnvelope("WagerTransactionPendingReference", pendenteID, pendenteID, map[string]any{"transactionId": pendenteID, "referenceExternalTransactionId": input.ReferenceExternalID})); err != nil {
-					return ResultadoAposta{}, err
-				}
-				if err = tx.Commit(ctx); err != nil {
 					return ResultadoAposta{}, err
 				}
 				return ResultadoAposta{ID: pendenteID, Status: "PENDING_REFERENCE", Balance: domain.NewInternalMoney(balance, walletCurrency)}, nil
@@ -383,9 +392,6 @@ func (s *Store) ProcessarAposta(ctx context.Context, input application.EntradaAp
 	if err = inserirEvento(ctx, tx, eventos.NovoEnvelope("WagerTransactionProcessed", transactionID, transactionID, map[string]any{"transactionId": transactionID, "status": status, "kind": input.Kind})); err != nil {
 		return ResultadoAposta{}, err
 	}
-	if err = tx.Commit(ctx); err != nil {
-		return ResultadoAposta{}, err
-	}
 	resultMoney, _ := domain.NewMoney(fmt.Sprintf("%d.%02d", next/100, next%100), walletCurrency)
 	return ResultadoAposta{ID: transactionID, Status: status, Balance: resultMoney}, nil
 }
@@ -445,9 +451,55 @@ func (s *Store) Resolver(ctx context.Context, transactionID string) error {
 }
 
 func (s *Store) Tratar(ctx context.Context, _ string, corpo string) error {
+	entrada, chave, err := entradaDoCorpo(corpo)
+	if err != nil {
+		return err
+	}
+	_, err = s.ProcessarAposta(ctx, entrada, chave)
+	return err
+}
+
+// TratarComInbox executa inbox, processamento financeiro e conclusão no mesmo commit.
+func (s *Store) TratarComInbox(ctx context.Context, consumidor, mensagemID, corpo string) error {
+	entrada, chave, err := entradaDoCorpo(corpo)
+	if err != nil {
+		return err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	hash := sha256.Sum256([]byte(corpo))
+	valor := hex.EncodeToString(hash[:])
+	var novo bool
+	err = tx.QueryRow(ctx, "INSERT INTO inbox_messages(consumer_name,message_id,payload_hash) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING true", consumidor, mensagemID, valor).Scan(&novo)
+	if err != nil {
+		var concluida *time.Time
+		var existente string
+		if err = tx.QueryRow(ctx, "SELECT payload_hash,completed_at FROM inbox_messages WHERE consumer_name=$1 AND message_id=$2 FOR UPDATE", consumidor, mensagemID).Scan(&existente, &concluida); err != nil {
+			return err
+		}
+		if existente != valor {
+			return errors.New("mensagem SQS duplicada com payload divergente")
+		}
+		if concluida != nil {
+			return tx.Commit(ctx)
+		}
+	}
+	if _, err = s.processarApostaNaTransacao(ctx, tx, entrada, chave); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, "UPDATE inbox_messages SET completed_at=now() WHERE consumer_name=$1 AND message_id=$2", consumidor, mensagemID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func entradaDoCorpo(corpo string) (application.EntradaAposta, string, error) {
 	var envelope map[string]any
 	if err := json.Unmarshal([]byte(corpo), &envelope); err != nil {
-		return err
+		return application.EntradaAposta{}, "", err
 	}
 	dados, ok := envelope["data"].(map[string]any)
 	if !ok {
@@ -458,7 +510,7 @@ func (s *Store) Tratar(ctx context.Context, _ string, corpo string) error {
 	currency, _ := dinheiro["currency"].(string)
 	money, err := domain.NewMoney(amount, currency)
 	if err != nil {
-		return err
+		return application.EntradaAposta{}, "", err
 	}
 	chave, _ := dados["idempotencyKey"].(string)
 	entrada := application.EntradaAposta{}
@@ -471,10 +523,9 @@ func (s *Store) Tratar(ctx context.Context, _ string, corpo string) error {
 	entrada.Kind, _ = dados["kind"].(string)
 	entrada.Money = money
 	if chave == "" {
-		return errors.New("idempotency key ausente")
+		return application.EntradaAposta{}, "", errors.New("idempotency key ausente")
 	}
-	_, err = s.ProcessarAposta(ctx, entrada, chave)
-	return err
+	return entrada, chave, nil
 }
 
 func inserirEvento(ctx context.Context, tx pgx.Tx, envelope eventos.Envelope) error {

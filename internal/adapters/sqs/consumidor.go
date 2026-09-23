@@ -22,6 +22,10 @@ type ClienteMensagens interface {
 	DeleteMessage(context.Context, *sqs.DeleteMessageInput, ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error)
 }
 
+type TratadorComInbox interface {
+	TratarComInbox(context.Context, string, string, string) error
+}
+
 type Consumidor struct {
 	Cliente        ClienteMensagens
 	FilaURL        string
@@ -52,6 +56,15 @@ func (c Consumidor) Executar(ctx context.Context) {
 		}
 		for _, mensagem := range resposta.Messages {
 			if mensagem.MessageId == nil || mensagem.ReceiptHandle == nil || mensagem.Body == nil {
+				continue
+			}
+			atomicamente, possuiAtomico := c.Tratador.(TratadorComInbox)
+			if possuiAtomico {
+				if err := atomicamente.TratarComInbox(ctx, c.NomeConsumidor, aws.ToString(mensagem.MessageId), aws.ToString(mensagem.Body)); err != nil {
+					slog.Error("falha ao tratar mensagem com inbox atomico", "messageId", aws.ToString(mensagem.MessageId), "erro", err)
+					continue
+				}
+				_, _ = c.Cliente.DeleteMessage(ctx, &sqs.DeleteMessageInput{QueueUrl: aws.String(c.FilaURL), ReceiptHandle: mensagem.ReceiptHandle})
 				continue
 			}
 			if c.Inbox != nil {
