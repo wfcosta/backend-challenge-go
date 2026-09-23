@@ -69,18 +69,36 @@ func (s *Store) Close() { s.pool.Close() }
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
 func (s *Store) CreateWallet(ctx context.Context, playerID string, money domain.Money) (Wallet, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Wallet{}, err
+	}
+	defer tx.Rollback(ctx)
 	var w Wallet
 	var minor int64
-	err := s.pool.QueryRow(ctx, "INSERT INTO wallets(player_id,currency,balance_minor,version) VALUES($1,$2,$3,1) RETURNING id, player_id, balance_minor, version",
+	err = tx.QueryRow(ctx, "INSERT INTO wallets(player_id,currency,balance_minor,version) VALUES($1,$2,$3,1) RETURNING id, player_id, balance_minor, version",
 		playerID, money.Currency(), money.Minor()).Scan(&w.ID, &w.Player, &minor, &w.Version)
 	if err != nil {
 		return Wallet{}, err
+	}
+	if minor > 0 {
+		var transactionID string
+		err = tx.QueryRow(ctx, "INSERT INTO wagering_transactions(wallet_id,player_id,kind,amount_minor,currency,status,result_balance_minor,result_wallet_version) VALUES($1,$2,'OPENING',$3,$4,'PROCESSED',$3,1) RETURNING id", w.ID, playerID, minor, money.Currency()).Scan(&transactionID)
+		if err != nil {
+			return Wallet{}, err
+		}
+		if _, err = tx.Exec(ctx, "INSERT INTO ledger_entries(wallet_id,transaction_id,direction,amount_minor,balance_before_minor,balance_after_minor) VALUES($1,$2,'CREDIT',$3,0,$3)", w.ID, transactionID, minor); err != nil {
+			return Wallet{}, err
+		}
 	}
 	normalized, err := domain.NewMoney(fmt.Sprintf("%d.%02d", minor/100, minor%100), money.Currency())
 	if err != nil {
 		return Wallet{}, err
 	}
 	w.Balance = normalized
+	if err := tx.Commit(ctx); err != nil {
+		return Wallet{}, err
+	}
 	return w, nil
 }
 
@@ -154,10 +172,7 @@ func (s *Store) ConciliarCarteira(ctx context.Context, walletID string) (Resulta
 	if err != nil {
 		return ResultadoConciliacao{}, err
 	}
-	reconstruido, err := domain.NewMoney(fmt.Sprintf("%d.%02d", calculado/100, calculado%100), moeda)
-	if err != nil {
-		return ResultadoConciliacao{}, err
-	}
+	reconstruido := domain.NewInternalMoney(calculado, moeda)
 	diferenca := domain.NewInternalMoney(armazenado-calculado, moeda)
 	return ResultadoConciliacao{CarteiraID: walletID, SaldoArmazenado: saldo, SaldoCalculado: reconstruido, Diferenca: diferenca, Consistente: diferenca.IsZero(), LancamentosVerificados: quantidade}, nil
 }
