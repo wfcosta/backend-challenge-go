@@ -22,6 +22,15 @@ func TestAPIComCompose(t *testing.T) {
 	if resposta.StatusCode != http.StatusOK {
 		t.Fatalf("liveness: %d", resposta.StatusCode)
 	}
+	resposta, err = http.Get(base + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resposta.StatusCode != http.StatusOK {
+		resposta.Body.Close()
+		t.Fatalf("metricas: %d", resposta.StatusCode)
+	}
+	resposta.Body.Close()
 	resposta, err = http.Get(base + "/wallets/00000000-0000-0000-0000-000000000001")
 	if err != nil {
 		t.Fatal(err)
