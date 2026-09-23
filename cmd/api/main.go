@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/wfcosta/backend-challenge-go/internal/application"
 	"github.com/wfcosta/backend-challenge-go/internal/domain"
 	"github.com/wfcosta/backend-challenge-go/internal/store"
 )
@@ -57,6 +59,45 @@ func main() {
 				return
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"id": wallet.ID, "playerId": wallet.Player, "balance": moneyJSON(wallet.Balance), "version": wallet.Version})
+		})
+		mux.HandleFunc("POST /wagering/transactions", func(w http.ResponseWriter, r *http.Request) {
+			key := r.Header.Get("Idempotency-Key")
+			if key == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing Idempotency-Key"})
+				return
+			}
+			var raw struct {
+				ProviderID string
+				ExternalID string
+				PlayerID   string
+				WalletID   string
+				RoundID    string
+				GameID     string
+				Kind       string
+				Money      struct {
+					Amount   string
+					Currency string
+				}
+			}
+			if json.NewDecoder(r.Body).Decode(&raw) != nil {
+				writeJSON(w, 400, map[string]string{"error": "invalid request"})
+				return
+			}
+			money, err := domain.NewMoney(raw.Money.Amount, raw.Money.Currency)
+			if err != nil {
+				writeJSON(w, 400, map[string]string{"error": err.Error()})
+				return
+			}
+			result, err := db.SubmitWager(r.Context(), application.WagerInput{ProviderID: raw.ProviderID, ExternalID: raw.ExternalID, PlayerID: raw.PlayerID, WalletID: raw.WalletID, RoundID: raw.RoundID, GameID: raw.GameID, Kind: raw.Kind, Money: money}, key)
+			if err != nil {
+				if errors.Is(err, application.ErrIdempotencyConflict) {
+					writeJSON(w, 409, map[string]string{"error": err.Error()})
+					return
+				}
+				writeJSON(w, 422, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, 200, map[string]any{"transactionId": result.ID, "status": result.Status, "balance": moneyJSON(result.Balance), "idempotentReplay": result.Replay})
 		})
 	}
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })

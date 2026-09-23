@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wfcosta/backend-challenge-go/internal/application"
 	"github.com/wfcosta/backend-challenge-go/internal/domain"
 )
 
@@ -17,6 +18,14 @@ type Wallet struct {
 	Player  string
 	Balance domain.Money
 	Version int64
+}
+
+type WagerResult struct {
+	ID          string
+	Status      string
+	Balance     domain.Money
+	Replay      bool
+	FailureCode string
 }
 
 type Store struct{ pool *pgxpool.Pool }
@@ -70,4 +79,79 @@ func (s *Store) GetWallet(ctx context.Context, id string) (Wallet, error) {
 	}
 	w.Balance = m
 	return w, nil
+}
+
+func (s *Store) SubmitWager(ctx context.Context, input application.WagerInput, idempotencyKey string) (WagerResult, error) {
+	if err := application.ValidateWager(input); err != nil {
+		return WagerResult{}, err
+	}
+	hash := application.PayloadHash(input)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return WagerResult{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var existing WagerResult
+	var minor int64
+	var currency string
+	var storedHash string
+	err = tx.QueryRow(ctx, "SELECT id,status,result_balance_minor,currency,payload_hash,COALESCE(failure_code,'') FROM wagering_transactions WHERE idempotency_key=$1 FOR UPDATE", idempotencyKey).
+		Scan(&existing.ID, &existing.Status, &minor, &currency, &storedHash, &existing.FailureCode)
+	if err == nil {
+		if storedHash != hash {
+			return WagerResult{}, application.ErrIdempotencyConflict
+		}
+		existing.Replay = true
+		existing.Balance, _ = domain.NewMoney(fmt.Sprintf("%d.%02d", minor/100, minor%100), currency)
+		return existing, nil
+	}
+
+	var walletCurrency string
+	var balance, version int64
+	err = tx.QueryRow(ctx, "SELECT currency,balance_minor,version FROM wallets WHERE id=$1 FOR UPDATE", input.WalletID).
+		Scan(&walletCurrency, &balance, &version)
+	if err != nil {
+		return WagerResult{}, ErrWalletNotFound
+	}
+	if walletCurrency != input.Money.Currency() {
+		return WagerResult{}, domain.ErrCurrencyMismatch
+	}
+	amount := input.Money.Minor()
+	next := balance
+	direction := ""
+	if input.Kind == "BET" {
+		if amount > balance {
+			return WagerResult{}, errors.New("insufficient balance")
+		}
+		next = balance - amount
+		direction = "DEBIT"
+	}
+	if input.Kind == "WIN" {
+		next = balance + amount
+		direction = "CREDIT"
+	}
+	nextVersion := version
+	if direction != "" {
+		nextVersion++
+	}
+	var transactionID string
+	status := "PROCESSED"
+	err = tx.QueryRow(ctx, "INSERT INTO wagering_transactions(provider_id,external_transaction_id,idempotency_key,payload_hash,wallet_id,player_id,round_id,game_id,kind,amount_minor,currency,status,result_balance_minor,result_wallet_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id", input.ProviderID, input.ExternalID, idempotencyKey, hash, input.WalletID, input.PlayerID, input.RoundID, input.GameID, input.Kind, amount, input.Money.Currency(), status, next, nextVersion).Scan(&transactionID)
+	if err != nil {
+		return WagerResult{}, err
+	}
+	if direction != "" {
+		if _, err = tx.Exec(ctx, "UPDATE wallets SET balance_minor=$1,version=$2,updated_at=now() WHERE id=$3", next, nextVersion, input.WalletID); err != nil {
+			return WagerResult{}, err
+		}
+		if _, err = tx.Exec(ctx, "INSERT INTO ledger_entries(wallet_id,transaction_id,direction,amount_minor,balance_before_minor,balance_after_minor) VALUES($1,$2,$3,$4,$5,$6)", input.WalletID, transactionID, direction, amount, balance, next); err != nil {
+			return WagerResult{}, err
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return WagerResult{}, err
+	}
+	resultMoney, _ := domain.NewMoney(fmt.Sprintf("%d.%02d", next/100, next%100), walletCurrency)
+	return WagerResult{ID: transactionID, Status: status, Balance: resultMoney}, nil
 }
