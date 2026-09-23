@@ -32,7 +32,7 @@ func HashPayload(input EntradaAposta) string {
 
 func ValidarAposta(input EntradaAposta) error {
 	switch input.Kind {
-	case "BET", "WIN":
+	case "BET", "WIN", "REFUND", "ROLLBACK":
 		if input.Money.IsZero() {
 			return fmt.Errorf("%w: a operacao exige valor positivo", domain.ErrInvalidMoney)
 		}
@@ -45,6 +45,9 @@ func ValidarAposta(input EntradaAposta) error {
 	}
 	if input.ProviderID == "" || input.ExternalID == "" || input.WalletID == "" {
 		return errors.New("identidade da aposta ausente")
+	}
+	if (input.Kind == "REFUND" || input.Kind == "ROLLBACK") && input.ReferenceExternalID == "" {
+		return errors.New("referencia obrigatoria para reversao")
 	}
 	return nil
 }

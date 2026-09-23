@@ -272,6 +272,35 @@ func (s *Store) ProcessarAposta(ctx context.Context, input application.EntradaAp
 	amount := input.Money.Minor()
 	next := balance
 	direction := ""
+	if input.Kind == "REFUND" || input.Kind == "ROLLBACK" {
+		var refKind, refWallet, refCurrency, refStatus string
+		var refAmount int64
+		err = tx.QueryRow(ctx, "SELECT kind,wallet_id,currency,amount_minor,status FROM wagering_transactions WHERE provider_id=$1 AND external_transaction_id=$2 FOR UPDATE", input.ProviderID, input.ReferenceExternalID).Scan(&refKind, &refWallet, &refCurrency, &refAmount, &refStatus)
+		if err != nil {
+			return ResultadoAposta{}, errors.New("referencia nao encontrada")
+		}
+		if refStatus != "PROCESSED" || refWallet != input.WalletID || refCurrency != input.Money.Currency() || refAmount != amount {
+			return ResultadoAposta{}, errors.New("referencia invalida")
+		}
+		var duplicadas int
+		_ = tx.QueryRow(ctx, "SELECT COUNT(*) FROM wagering_transactions WHERE provider_id=$1 AND reference_external_id=$2 AND kind=$3 AND status='PROCESSED'", input.ProviderID, input.ReferenceExternalID, input.Kind).Scan(&duplicadas)
+		if duplicadas > 0 {
+			return ResultadoAposta{}, errors.New("reversao duplicada")
+		}
+		if input.Kind == "REFUND" && refKind != "BET" {
+			return ResultadoAposta{}, errors.New("REFUND exige referencia BET")
+		}
+		if input.Kind == "REFUND" || refKind == "BET" {
+			next = balance + amount
+			direction = "CREDIT"
+		} else {
+			if amount > balance {
+				return ResultadoAposta{}, errors.New("saldo insuficiente para reversao")
+			}
+			next = balance - amount
+			direction = "DEBIT"
+		}
+	}
 	if input.Kind == "BET" {
 		if amount > balance {
 			return ResultadoAposta{}, errors.New("saldo insuficiente")
@@ -289,7 +318,7 @@ func (s *Store) ProcessarAposta(ctx context.Context, input application.EntradaAp
 	}
 	var transactionID string
 	status := "PROCESSED"
-	err = tx.QueryRow(ctx, "INSERT INTO wagering_transactions(provider_id,external_transaction_id,idempotency_key,payload_hash,wallet_id,player_id,round_id,game_id,kind,amount_minor,currency,status,result_balance_minor,result_wallet_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id", input.ProviderID, input.ExternalID, idempotencyKey, hash, input.WalletID, input.PlayerID, input.RoundID, input.GameID, input.Kind, amount, input.Money.Currency(), status, next, nextVersion).Scan(&transactionID)
+	err = tx.QueryRow(ctx, "INSERT INTO wagering_transactions(provider_id,external_transaction_id,idempotency_key,payload_hash,wallet_id,player_id,round_id,game_id,kind,amount_minor,currency,reference_external_id,status,result_balance_minor,result_wallet_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id", input.ProviderID, input.ExternalID, idempotencyKey, hash, input.WalletID, input.PlayerID, input.RoundID, input.GameID, input.Kind, amount, input.Money.Currency(), input.ReferenceExternalID, status, next, nextVersion).Scan(&transactionID)
 	if err != nil {
 		return ResultadoAposta{}, err
 	}
