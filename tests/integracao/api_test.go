@@ -2,11 +2,14 @@ package integracao
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestAPIComCompose(t *testing.T) {
@@ -86,4 +89,78 @@ func TestProviderNaoAcessaOutroProvider(t *testing.T) {
 	if resposta.StatusCode != http.StatusForbidden {
 		t.Fatalf("consulta: status esperado 403, recebido %d", resposta.StatusCode)
 	}
+}
+
+func TestIdempotenciaConcorrenteProcessaUmaVez(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "true" {
+		t.Skip("defina INTEGRATION=true")
+	}
+	internal := obterToken(t, "wallet-internal", "internal-secret")
+	provider := obterToken(t, "provider-a", "provider-a-secret")
+	playerID := "00000000-0000-0000-0000-" + fmt.Sprintf("%012d", time.Now().UnixNano()%1000000000000)
+	criar := `{"playerId":"` + playerID + `","initialBalance":{"amount":"100.00","currency":"BRL"}}`
+	req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8081/wallets", strings.NewReader(criar))
+	req.Header.Set("Authorization", "Bearer "+internal)
+	req.Header.Set("Content-Type", "application/json")
+	resposta, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resposta.Body.Close()
+	if resposta.StatusCode != http.StatusCreated {
+		t.Fatalf("criação da carteira: %d", resposta.StatusCode)
+	}
+	var carteira struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resposta.Body).Decode(&carteira); err != nil {
+		t.Fatal(err)
+	}
+	corpo := `{"providerId":"provider-a","externalTransactionId":"concorrente-` + playerID + `","walletId":"` + carteira.ID + `","playerId":"` + playerID + `","roundId":"round-1","gameId":"game-1","kind":"BET","money":{"amount":"80.00","currency":"BRL"}}`
+	const total = 10
+	resultados := make(chan int, total)
+	var grupo sync.WaitGroup
+	for i := 0; i < total; i++ {
+		grupo.Add(1)
+		go func() {
+			defer grupo.Done()
+			operacao, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8081/wagering/transactions", strings.NewReader(corpo))
+			operacao.Header.Set("Authorization", "Bearer "+provider)
+			operacao.Header.Set("Idempotency-Key", "concorrente-"+playerID)
+			operacao.Header.Set("Content-Type", "application/json")
+			res, err := http.DefaultClient.Do(operacao)
+			if err != nil {
+				resultados <- 0
+				return
+			}
+			res.Body.Close()
+			resultados <- res.StatusCode
+		}()
+	}
+	grupo.Wait()
+	close(resultados)
+	for status := range resultados {
+		if status != http.StatusOK {
+			t.Fatalf("status concorrente inesperado: %d", status)
+		}
+	}
+}
+
+func obterToken(t *testing.T, cliente, segredo string) string {
+	t.Helper()
+	form := url.Values{"client_id": {cliente}, "client_secret": {segredo}, "grant_type": {"client_credentials"}}
+	resposta, err := http.Post("http://127.0.0.1:8080/realms/jungle-gaming/protocol/openid-connect/token", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resposta.Body.Close()
+	var token map[string]any
+	if err := json.NewDecoder(resposta.Body).Decode(&token); err != nil {
+		t.Fatal(err)
+	}
+	valor, _ := token["access_token"].(string)
+	if valor == "" {
+		t.Fatalf("token não obtido para %s", cliente)
+	}
+	return valor
 }
