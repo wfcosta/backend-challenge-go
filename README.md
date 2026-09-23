@@ -2,13 +2,54 @@
 
 Serviço de processamento distribuído de apostas. Os requisitos estão em spec.md, o plano técnico em spec tecnica.md e a execução incremental em plan.md.
 
+## O que este projeto faz
+
+Este serviço recebe operações financeiras de jogos, como aposta (`BET`), prêmio (`WIN`), perda (`LOSS`) e reversões (`REFUND` e `ROLLBACK`). Ele mantém o saldo da carteira, grava um ledger imutável e publica eventos para outros sistemas.
+
+O dinheiro nunca é representado por `float`: `R$ 10,25` vira `1025` centavos em um inteiro de 64 bits. Isso evita erros de arredondamento.
+
+## Visão rápida da arquitetura
+
+```mermaid
+flowchart LR
+  P[Provider de jogos] -->|HTTPS + JWT| A[API Go]
+  A --> K[Keycloak]
+  A --> PG[(PostgreSQL)]
+  PG --> O[Outbox]
+  O --> E[SQS de eventos]
+  C[SQS de comandos] --> A
+  C --> D[DLQ]
+```
+
+O PostgreSQL é a fonte de verdade. O SQS usa entrega pelo menos uma vez; por isso a operação é idempotente e o inbox impede o processamento repetido de mensagens concluídas.
+
 ## Subir o ambiente
 Pré-requisitos: Docker com Compose e Go 1.27+.
 ```bash
 cp .env.example .env
 docker compose up --build
 ```
+
+Para executar em segundo plano:
+
+```bash
+docker compose up --build -d
+docker compose ps
+```
 Serviços: API em localhost:8081, Keycloak em localhost:8080 (admin/admin), PostgreSQL em localhost:5432 e LocalStack em localhost:4566.
+
+Para parar sem apagar dados:
+
+```bash
+docker compose down
+```
+
+Para recomeçar do zero, apagando volumes locais:
+
+```bash
+docker compose down -v
+docker compose up --build -d
+```
 
 ## Keycloak e tokens locais
 
@@ -22,6 +63,8 @@ curl http://localhost:8081/health/live
 curl http://localhost:8081/health/ready
 ```
 O realm jungle-gaming é importado de deploy/keycloak/realm-export.json. Os clients locais são provider-a, provider-b e wallet-internal. Substitua os segredos em ambientes reais.
+
+O client `provider-a` representa um provedor de jogos. O client `provider-b` representa outro provedor. O client `wallet-internal` é usado por operações internas de carteira. Em produção, os segredos devem vir de um gerenciador de segredos.
 
 ### Papéis e autorização
 
@@ -58,9 +101,24 @@ docker compose down
 ```
 Testes unitários usam mocks das portas; testes de integração devem usar PostgreSQL, Keycloak e LocalStack reais.
 
+O comando `go test ./...` executa os testes rápidos e ignora os testes que exigem infraestrutura. O comando abaixo executa a integração real:
+
 Para executar a integração contra o Compose:
 
     INTEGRATION=true go test ./tests/integracao -v
+
+Validações recomendadas antes de abrir um pull request:
+
+```bash
+gofmt -w .
+go test ./...
+go test -race ./...
+go vet ./...
+docker compose config --quiet
+INTEGRATION=true go test ./tests/integracao -v
+```
+
+O workflow `.github/workflows/ci.yml` executa essas verificações, constrói a imagem e sobe o Compose no GitHub Actions.
 
 ### Operação das filas e banco
 
@@ -103,3 +161,29 @@ Em caso de falha, verifique `docker compose ps`, `docker compose logs app`, `doc
 
 ## Documentação
 spec.md contém requisitos funcionais; spec tecnica.md contém arquitetura técnica; plan.md contém tarefas/BDD; ARCHITECTURE.md contém decisões e diagramas; docs/architecture.md explica a correspondência com Controller/Service/Entity do Java; docs/openapi.yaml é o contrato Swagger/OpenAPI.
+
+## Endpoints principais
+
+| Endpoint | Quem usa | Objetivo |
+|---|---|---|
+| `GET /health/live` | monitoramento | confirma que o processo está vivo |
+| `GET /health/ready` | monitoramento | confirma que o banco está disponível |
+| `GET /metrics` | Prometheus | expõe métricas |
+| `POST /wallets` | serviço interno | cria carteira |
+| `GET /wallets/{id}` | serviço interno | consulta saldo |
+| `GET /wallets/{id}/ledger` | serviço interno | consulta lançamentos |
+| `POST /wallets/{id}/reconciliation` | serviço interno | reconcilia saldo e ledger |
+| `POST /wagering/transactions` | provider | processa operação financeira |
+| `GET /wagering/transactions/{id}` | provider | consulta transação interna |
+| `GET /providers/{provider}/wagering/transactions/{external}` | provider | consulta por referência externa |
+
+O contrato detalhado está em [`docs/openapi.yaml`](docs/openapi.yaml).
+
+## Troubleshooting
+
+- API não inicia: execute `docker compose logs app` e confirme que Keycloak e PostgreSQL estão saudáveis.
+- `401`: obtenha um token novo no Keycloak e envie `Authorization: Bearer TOKEN`.
+- `403`: confirme que o provider do token é igual ao `providerId` e que o token interno está sendo usado para carteiras.
+- `503` no readiness: execute `docker compose logs postgres migrate`.
+- Filas ausentes: execute `docker compose logs filas` e liste as filas com o AWS CLI apontando para `http://localhost:4566`.
+- Migration travada: `docker compose down -v` e suba novamente em ambiente local descartável.
