@@ -43,7 +43,7 @@ func (p *PublicadorOutbox) Executar(ctx context.Context) {
 }
 
 func (p *PublicadorOutbox) publicarLote(ctx context.Context) {
-	rows, err := p.Banco.Query(ctx, "SELECT event_id,event_type,payload FROM outbox_events WHERE published_at IS NULL AND next_attempt_at <= now() ORDER BY occurred_at,event_id LIMIT 50")
+	rows, err := p.Banco.Query(ctx, "SELECT event_id,event_type,payload FROM outbox_events WHERE published_at IS NULL AND next_attempt_at <= now() AND (locked_until IS NULL OR locked_until < now()) ORDER BY occurred_at,event_id LIMIT 50")
 	if err != nil {
 		slog.Error("falha ao buscar outbox", "erro", err)
 		return
@@ -55,11 +55,15 @@ func (p *PublicadorOutbox) publicarLote(ctx context.Context) {
 			slog.Error("falha ao ler outbox", "erro", err)
 			continue
 		}
-		if err := p.Transporte.Publicar(ctx, evento); err != nil {
-			slog.Error("falha ao publicar evento", "eventId", evento.ID, "erro", err)
-			_, _ = p.Banco.Exec(ctx, "UPDATE outbox_events SET attempts=attempts+1,next_attempt_at=now()+LEAST((2^LEAST(attempts,10))*INTERVAL '1 second',INTERVAL '15 minutes') WHERE event_id=$1", evento.ID)
+		reservado, err := p.Banco.Exec(ctx, "UPDATE outbox_events SET locked_until=now()+INTERVAL '30 seconds' WHERE event_id=$1 AND published_at IS NULL AND (locked_until IS NULL OR locked_until < now())", evento.ID)
+		if err != nil || reservado.RowsAffected() != 1 {
 			continue
 		}
-		_, _ = p.Banco.Exec(ctx, "UPDATE outbox_events SET published_at=now() WHERE event_id=$1 AND published_at IS NULL", evento.ID)
+		if err := p.Transporte.Publicar(ctx, evento); err != nil {
+			slog.Error("falha ao publicar evento", "eventId", evento.ID, "erro", err)
+			_, _ = p.Banco.Exec(ctx, "UPDATE outbox_events SET attempts=attempts+1,locked_until=NULL,next_attempt_at=now()+LEAST((2^LEAST(attempts,10))*INTERVAL '1 second',INTERVAL '15 minutes') WHERE event_id=$1", evento.ID)
+			continue
+		}
+		_, _ = p.Banco.Exec(ctx, "UPDATE outbox_events SET published_at=now(),locked_until=NULL WHERE event_id=$1 AND published_at IS NULL", evento.ID)
 	}
 }
