@@ -158,10 +158,7 @@ func (s *Store) ConciliarCarteira(ctx context.Context, walletID string) (Resulta
 	if err != nil {
 		return ResultadoConciliacao{}, err
 	}
-	diferenca, err := saldo.Sub(reconstruido)
-	if err != nil {
-		diferenca = saldo.Negate()
-	}
+	diferenca := domain.NewInternalMoney(armazenado-calculado, moeda)
 	return ResultadoConciliacao{CarteiraID: walletID, SaldoArmazenado: saldo, SaldoCalculado: reconstruido, Diferenca: diferenca, Consistente: diferenca.IsZero(), LancamentosVerificados: quantidade}, nil
 }
 

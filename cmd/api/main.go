@@ -67,7 +67,15 @@ func main() {
 			if lancamentos, err := db.ListLedger(r.Context(), r.PathValue("id"), limite); err != nil {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 			} else {
-				writeJSON(w, http.StatusOK, lancamentos)
+				resposta := make([]map[string]any, 0, len(lancamentos))
+				for _, item := range lancamentos {
+					resposta = append(resposta, map[string]any{
+						"id": item.ID, "transactionId": item.TransactionID, "direction": item.Direcao,
+						"money": moneyJSON(item.Dinheiro), "balanceBefore": moneyJSON(item.SaldoAnterior),
+						"balanceAfter": moneyJSON(item.SaldoPosterior),
+					})
+				}
+				writeJSON(w, http.StatusOK, resposta)
 			}
 		})
 		mux.HandleFunc("POST /wallets/{id}/reconciliation", func(w http.ResponseWriter, r *http.Request) {

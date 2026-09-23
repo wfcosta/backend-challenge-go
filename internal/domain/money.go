@@ -51,9 +51,12 @@ func NewMoney(amount, currency string) (Money, error) {
 }
 
 func ZeroMoney(currency string) (Money, error) { return NewMoney("0.00", currency) }
-func (m Money) Currency() string               { return m.currency }
-func (m Money) Minor() int64                   { return m.minor }
-func (m Money) IsZero() bool                   { return m.minor == 0 }
+func NewInternalMoney(minor int64, currency string) Money {
+	return Money{minor: minor, currency: strings.ToUpper(currency)}
+}
+func (m Money) Currency() string { return m.currency }
+func (m Money) Minor() int64     { return m.minor }
+func (m Money) IsZero() bool     { return m.minor == 0 }
 func (m Money) String() string {
 	return fmt.Sprintf("%d.%02d", m.minor/100, m.minor%100)
 }
