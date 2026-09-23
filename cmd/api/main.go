@@ -249,7 +249,13 @@ func main() {
 				}()
 				return nil
 			},
-			OnStop: func(ctx context.Context) error { return server.Shutdown(ctx) },
+			OnStop: func(ctx context.Context) error {
+				if cancelarWorkers != nil {
+					cancelarWorkers()
+					workers.Wait()
+				}
+				return server.Shutdown(ctx)
+			},
 		})
 	}))
 	if err := aplicacao.Start(context.Background()); err != nil {
