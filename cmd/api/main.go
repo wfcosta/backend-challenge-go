@@ -11,10 +11,12 @@ import (
 	"syscall"
 	"time"
 
+	adaptadorsqs "github.com/wfcosta/backend-challenge-go/internal/adapters/sqs"
 	"github.com/wfcosta/backend-challenge-go/internal/application"
 	"github.com/wfcosta/backend-challenge-go/internal/auth"
 	"github.com/wfcosta/backend-challenge-go/internal/domain"
 	"github.com/wfcosta/backend-challenge-go/internal/store"
+	"github.com/wfcosta/backend-challenge-go/internal/worker"
 )
 
 func main() {
@@ -172,6 +174,21 @@ func main() {
 		}
 		defer autenticador.Fechar()
 		handler = autenticarRotas(handler, autenticador)
+	}
+	var cancelarWorkers context.CancelFunc
+	if db != nil && os.Getenv("SQS_ENDPOINT") != "" && os.Getenv("SQS_QUEUE_URL") != "" {
+		cliente, err := adaptadorsqs.NovoCliente(context.Background(), os.Getenv("AWS_REGION"), os.Getenv("SQS_ENDPOINT"))
+		if err != nil {
+			slog.Error("falha ao configurar SQS", "erro", err)
+			os.Exit(1)
+		}
+		ctxWorkers, cancelar := context.WithCancel(context.Background())
+		cancelarWorkers = cancelar
+		publicador := worker.PublicadorOutbox{Banco: db.Pool(), Transporte: adaptadorsqs.Publicador{Cliente: cliente, FilaURL: os.Getenv("SQS_QUEUE_URL")}, Intervalo: time.Second}
+		go publicador.Executar(ctxWorkers)
+	}
+	if cancelarWorkers != nil {
+		defer cancelarWorkers()
 	}
 	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	go func() {

@@ -101,6 +101,7 @@ func New(ctx context.Context, databaseURL string) (*Store, error) {
 func (s *Store) Close() { s.pool.Close() }
 
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
+func (s *Store) Pool() *pgxpool.Pool            { return s.pool }
 
 func (s *Store) Registrar(ctx context.Context, consumidor, mensagemID, corpo string) (bool, error) {
 	hash := sha256.Sum256([]byte(corpo))

@@ -54,6 +54,11 @@ services:
       DATABASE_URL: postgres://orchestration:orchestration@postgres:5432/orchestration?sslmode=disable
       OIDC_ISSUER_URL: http://keycloak:8080/realms/jungle-gaming
       OIDC_AUDIENCE: provider-a
+      SQS_ENDPOINT: http://localstack:4566
+      SQS_QUEUE_URL: http://localstack:4566/000000000000/wager-transactions.fifo
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
     depends_on:
       keycloak: {condition: service_started}
       postgres: {condition: service_healthy}
