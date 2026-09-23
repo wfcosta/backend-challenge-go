@@ -42,3 +42,13 @@ jobs:
 
       - name: Construir imagem Docker
         run: docker build -t backend-challenge-go:ci .
+
+      - name: Subir infraestrutura de integração
+        run: docker compose up --build -d
+
+      - name: Executar integração contra Compose
+        run: INTEGRATION=true go test ./tests/integracao -v
+
+      - name: Derrubar infraestrutura
+        if: always()
+        run: docker compose down -v
