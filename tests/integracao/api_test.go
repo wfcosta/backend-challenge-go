@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	adaptadorsqs "github.com/wfcosta/backend-challenge-go/internal/adapters/sqs"
 )
 
@@ -103,6 +105,33 @@ func TestFilasSQSProvisionadas(t *testing.T) {
 		if !strings.Contains(texto, fila) {
 			t.Fatalf("fila SQS ausente: %s", fila)
 		}
+	}
+}
+
+func TestConfiguracaoDaDLQ(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "true" {
+		t.Skip("defina INTEGRATION=true")
+	}
+	t.Setenv("AWS_ACCESS_KEY_ID", "test")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
+	t.Setenv("AWS_REGION", "us-east-1")
+	cliente, err := adaptadorsqs.NovoCliente(context.Background(), "us-east-1", "http://127.0.0.1:4566")
+	if err != nil {
+		t.Fatal(err)
+	}
+	url, err := cliente.GetQueueUrl(context.Background(), &sqs.GetQueueUrlInput{QueueName: aws.String("wager-transactions.fifo")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	atributos, err := cliente.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: url.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameAll}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if atributos.Attributes[string(types.QueueAttributeNameVisibilityTimeout)] != "30" {
+		t.Fatalf("visibility timeout inesperado: %q", atributos.Attributes[string(types.QueueAttributeNameVisibilityTimeout)])
+	}
+	if !strings.Contains(atributos.Attributes[string(types.QueueAttributeNameRedrivePolicy)], "wager-transactions-dlq.fifo") {
+		t.Fatalf("redrive policy ausente: %s", atributos.Attributes[string(types.QueueAttributeNameRedrivePolicy)])
 	}
 }
 
