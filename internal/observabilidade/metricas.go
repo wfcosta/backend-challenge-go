@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"sync/atomic"
+
+	"github.com/google/uuid"
 )
 
 type Metricas struct {
@@ -13,7 +15,15 @@ type Metricas struct {
 }
 
 func (m *Metricas) Middleware(proximo http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { m.Requisicoes.Add(1); proximo.ServeHTTP(w, r) })
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.Requisicoes.Add(1)
+		correlacao := r.Header.Get("X-Correlation-ID")
+		if correlacao == "" {
+			correlacao = uuid.NewString()
+		}
+		w.Header().Set("X-Correlation-ID", correlacao)
+		proximo.ServeHTTP(w, r)
+	})
 }
 func (m *Metricas) Handler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
