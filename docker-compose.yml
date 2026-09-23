@@ -20,6 +20,11 @@ services:
     volumes:
       - ./deploy/keycloak:/opt/keycloak/data/import:ro
     ports: ["8080:8080"]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
   localstack:
     image: localstack/localstack:3.5
     environment:
@@ -60,7 +65,7 @@ services:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
     depends_on:
-      keycloak: {condition: service_started}
+      keycloak: {condition: service_healthy}
       postgres: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
     ports: ["8081:8081"]

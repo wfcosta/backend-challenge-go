@@ -9,6 +9,14 @@ cp .env.example .env
 docker compose up --build
 ```
 Serviços: API em localhost:8081, Keycloak em localhost:8080 (admin/admin), PostgreSQL em localhost:5432 e LocalStack em localhost:4566.
+
+## Keycloak e tokens locais
+
+O realm jungle-gaming é importado automaticamente. Para obter um token de provider, faça um POST para:
+
+    http://localhost:8080/realms/jungle-gaming/protocol/openid-connect/token
+
+Envie form-urlencoded com client_id=provider-a, client_secret=provider-a-secret e grant_type=client_credentials. Use o access_token como Authorization: Bearer TOKEN. O client interno é wallet-internal com secret internal-secret.
 ```bash
 curl http://localhost:8081/health/live
 curl http://localhost:8081/health/ready
@@ -24,6 +32,10 @@ go vet ./...
 docker compose down
 ```
 Testes unitários usam mocks das portas; testes de integração devem usar PostgreSQL, Keycloak e LocalStack reais.
+
+Para executar a integração contra o Compose:
+
+    INTEGRATION=true go test ./tests/integracao -v
 
 ## Documentação
 spec.md contém requisitos funcionais; spec tecnica.md contém arquitetura técnica; plan.md contém tarefas/BDD; ARCHITECTURE.md contém decisões e diagramas; docs/architecture.md explica a correspondência com Controller/Service/Entity do Java; docs/openapi.yaml é o contrato Swagger/OpenAPI.
