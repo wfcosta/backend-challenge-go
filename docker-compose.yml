@@ -46,6 +46,7 @@ services:
         until aws --endpoint-url http://localstack:4566 sqs list-queues >/dev/null 2>&1; do sleep 2; done
         aws --endpoint-url http://localstack:4566 sqs create-queue --queue-name wager-transactions-dlq.fifo --attributes FifoQueue=true,ContentBasedDeduplication=true || true
         aws --endpoint-url http://localstack:4566 sqs create-queue --queue-name wager-transactions.fifo --attributes '{"FifoQueue":"true","ContentBasedDeduplication":"true","RedrivePolicy":"{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:000000000000:wager-transactions-dlq.fifo\",\"maxReceiveCount\":\"5\"}"}' || true
+        aws --endpoint-url http://localstack:4566 sqs create-queue --queue-name wager-events.fifo --attributes FifoQueue=true,ContentBasedDeduplication=true || true
   migrate:
     image: migrate/migrate:v4.17.1
     volumes:
@@ -64,6 +65,7 @@ services:
       OIDC_AUDIENCE: account
       SQS_ENDPOINT: http://localstack:4566
       SQS_QUEUE_URL: http://localstack:4566/000000000000/wager-transactions.fifo
+      SQS_EVENT_QUEUE_URL: http://localstack:4566/000000000000/wager-events.fifo
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test

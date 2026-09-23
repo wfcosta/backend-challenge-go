@@ -114,7 +114,8 @@ func main() {
 				return
 			}
 			providerID, _ := raw["providerId"].(string)
-			if autorizado := auth.Provedor(r.Context()); autorizado != "" && autorizado != providerID {
+			autorizado := auth.Provedor(r.Context())
+			if autorizado == "" || !auth.EhProvider(r.Context()) || autorizado != providerID {
 				writeJSON(w, http.StatusForbidden, map[string]string{"error": "provider nao autorizado"})
 				return
 			}
@@ -153,7 +154,8 @@ func main() {
 			writeJSON(w, http.StatusOK, map[string]any{"transactionId": result.ID, "status": result.Status, "balance": moneyJSON(result.Balance), "failureCode": result.FailureCode})
 		})
 		mux.HandleFunc("GET /providers/{provider}/wagering/transactions/{external}", func(w http.ResponseWriter, r *http.Request) {
-			if autorizado := auth.Provedor(r.Context()); autorizado != "" && autorizado != r.PathValue("provider") {
+			autorizado := auth.Provedor(r.Context())
+			if autorizado == "" || !auth.EhProvider(r.Context()) || autorizado != r.PathValue("provider") {
 				writeJSON(w, http.StatusForbidden, map[string]string{"error": "provider nao autorizado"})
 				return
 			}
@@ -189,6 +191,9 @@ func main() {
 		}
 		defer autenticador.Fechar()
 		handler = autenticarRotas(handler, autenticador)
+	} else if os.Getenv("DEV_MODE") != "true" {
+		slog.Error("OIDC_ISSUER_URL obrigatorio; use DEV_MODE=true apenas localmente")
+		os.Exit(1)
 	}
 	var cancelarWorkers context.CancelFunc
 	if db != nil && os.Getenv("SQS_ENDPOINT") != "" && os.Getenv("SQS_QUEUE_URL") != "" {
@@ -199,7 +204,11 @@ func main() {
 		}
 		ctxWorkers, cancelar := context.WithCancel(context.Background())
 		cancelarWorkers = cancelar
-		publicador := worker.PublicadorOutbox{Banco: db.Pool(), Transporte: adaptadorsqs.Publicador{Cliente: cliente, FilaURL: os.Getenv("SQS_QUEUE_URL")}, Intervalo: time.Second}
+		filaEventos := os.Getenv("SQS_EVENT_QUEUE_URL")
+		if filaEventos == "" {
+			filaEventos = os.Getenv("SQS_QUEUE_URL")
+		}
+		publicador := worker.PublicadorOutbox{Banco: db.Pool(), Transporte: adaptadorsqs.Publicador{Cliente: cliente, FilaURL: filaEventos}, Intervalo: time.Second}
 		go publicador.Executar(ctxWorkers)
 		consumidor := adaptadorsqs.Consumidor{Cliente: cliente, FilaURL: os.Getenv("SQS_QUEUE_URL"), Tratador: db, Inbox: db, NomeConsumidor: "apostas"}
 		go consumidor.Executar(ctxWorkers)

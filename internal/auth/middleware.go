@@ -30,6 +30,11 @@ func Provedor(ctx context.Context) string {
 	return ""
 }
 
+func EhProvider(ctx context.Context) bool {
+	provedor := Provedor(ctx)
+	return provedor == "provider-a" || provedor == "provider-b" || TemPapel(ctx, "provider:transactions")
+}
+
 // TemPapel verifica papeis do realm e papeis de cliente presentes no token.
 // O azp e usado apenas como compatibilidade com os clients locais exportados.
 func TemPapel(ctx context.Context, papel string) bool {
