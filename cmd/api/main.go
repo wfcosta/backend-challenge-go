@@ -60,6 +60,14 @@ func main() {
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"id": wallet.ID, "playerId": wallet.Player, "balance": moneyJSON(wallet.Balance), "version": wallet.Version})
 		})
+		mux.HandleFunc("GET /wallets/{id}/ledger", func(w http.ResponseWriter, r *http.Request) {
+			limite := 50
+			if lancamentos, err := db.ListLedger(r.Context(), r.PathValue("id"), limite); err != nil {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			} else {
+				writeJSON(w, http.StatusOK, lancamentos)
+			}
+		})
 		mux.HandleFunc("POST /wagering/transactions", func(w http.ResponseWriter, r *http.Request) {
 			key := r.Header.Get("Idempotency-Key")
 			if key == "" {

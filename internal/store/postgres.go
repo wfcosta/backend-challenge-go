@@ -28,6 +28,15 @@ type ResultadoAposta struct {
 	FailureCode string
 }
 
+type Lancamento struct {
+	ID             string
+	TransactionID  string
+	Direcao        string
+	Dinheiro       domain.Money
+	SaldoAnterior  domain.Money
+	SaldoPosterior domain.Money
+}
+
 type Store struct{ pool *pgxpool.Pool }
 
 func New(ctx context.Context, databaseURL string) (*Store, error) {
@@ -79,6 +88,44 @@ func (s *Store) GetWallet(ctx context.Context, id string) (Wallet, error) {
 	}
 	w.Balance = m
 	return w, nil
+}
+
+func (s *Store) ListLedger(ctx context.Context, walletID string, limit int) ([]Lancamento, error) {
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, "SELECT id,transaction_id,direction,amount_minor,balance_before_minor,balance_after_minor FROM ledger_entries WHERE wallet_id=$1 ORDER BY created_at,id LIMIT $2", walletID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []Lancamento
+	for rows.Next() {
+		var item Lancamento
+		var amount, before, after int64
+		var currency string
+		if err := rows.Scan(&item.ID, &item.TransactionID, &item.Direcao, &amount, &before, &after); err != nil {
+			return nil, err
+		}
+		err = s.pool.QueryRow(ctx, "SELECT currency FROM wallets WHERE id=$1", walletID).Scan(&currency)
+		if err != nil {
+			return nil, err
+		}
+		item.Dinheiro, err = domain.NewMoney(fmt.Sprintf("%d.%02d", amount/100, amount%100), currency)
+		if err != nil {
+			return nil, err
+		}
+		item.SaldoAnterior, err = domain.NewMoney(fmt.Sprintf("%d.%02d", before/100, before%100), currency)
+		if err != nil {
+			return nil, err
+		}
+		item.SaldoPosterior, err = domain.NewMoney(fmt.Sprintf("%d.%02d", after/100, after%100), currency)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }
 
 func (s *Store) ProcessarAposta(ctx context.Context, input application.EntradaAposta, idempotencyKey string) (ResultadoAposta, error) {
