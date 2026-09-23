@@ -36,7 +36,7 @@ func (t TrabalhadorReferencias) Executar(ctx context.Context) {
 }
 
 func (t TrabalhadorReferencias) tentar(ctx context.Context) {
-	rows, err := t.Banco.Query(ctx, "SELECT id FROM wagering_transactions WHERE status='PENDING_REFERENCE' AND updated_at < now()-INTERVAL '1 second' ORDER BY updated_at LIMIT 50")
+	rows, err := t.Banco.Query(ctx, "SELECT id,reference_attempts FROM wagering_transactions WHERE status='PENDING_REFERENCE' AND reference_next_attempt_at <= now() ORDER BY reference_next_attempt_at LIMIT 50")
 	if err != nil {
 		slog.Error("falha ao buscar referencias pendentes", "erro", err)
 		return
@@ -44,12 +44,27 @@ func (t TrabalhadorReferencias) tentar(ctx context.Context) {
 	defer rows.Close()
 	for rows.Next() {
 		var id string
-		if err := rows.Scan(&id); err != nil {
+		var tentativas int
+		if err := rows.Scan(&id, &tentativas); err != nil {
 			continue
 		}
 		if err := t.Resolutor.Resolver(ctx, id); err != nil {
 			slog.Warn("referencia ainda nao resolvida", "transactionId", id, "erro", err)
+			tentativas++
+			if tentativas >= 5 {
+				_, _ = t.Banco.Exec(ctx, "UPDATE wagering_transactions SET status='REJECTED',failure_code='REFERENCE_RETRY_EXHAUSTED',updated_at=now() WHERE id=$1 AND status='PENDING_REFERENCE'", id)
+				continue
+			}
+			segundos := 1 << min(tentativas, 8)
+			_, _ = t.Banco.Exec(ctx, "UPDATE wagering_transactions SET reference_attempts=$1,reference_next_attempt_at=now()+($2 * INTERVAL '1 second'),updated_at=now() WHERE id=$3 AND status='PENDING_REFERENCE'", tentativas, segundos, id)
 			continue
 		}
 	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
