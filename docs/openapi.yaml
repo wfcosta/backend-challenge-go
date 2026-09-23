@@ -21,11 +21,27 @@ paths:
       responses:
         '200': {description: Serviço pronto}
         '503': {description: Dependência indisponível}
+  /metrics:
+    get:
+      security: []
+      summary: Exibe métricas Prometheus
+      responses:
+        '200':
+          description: Métricas
+          content:
+            text/plain: {schema: {type: string}}
   /wallets:
     post:
       summary: Cria uma carteira
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CriarCarteira'}
       responses:
-        '201': {description: Carteira criada}
+        '201':
+          description: Carteira criada
+          content: {application/json: {schema: {$ref: '#/components/schemas/Carteira'}}}
         '400': {description: Entrada inválida}
         '409': {description: Conflito}
   /wallets/{walletId}:
@@ -37,8 +53,32 @@ paths:
           required: true
           schema: {type: string, format: uuid}
       responses:
-        '200': {description: Carteira}
+        '200':
+          description: Carteira
+          content: {application/json: {schema: {$ref: '#/components/schemas/Carteira'}}}
         '404': {description: Não encontrada}
+  /wallets/{walletId}/ledger:
+    get:
+      summary: Consulta o ledger imutável da carteira
+      parameters:
+        - {$ref: '#/components/parameters/WalletId'}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100}
+        - name: cursor
+          in: query
+          schema: {type: string}
+      responses:
+        '200': {description: Lançamentos da carteira}
+        '404': {description: Carteira não encontrada}
+  /wallets/{walletId}/reconciliation:
+    post:
+      summary: Reconcilia saldo armazenado contra o ledger
+      parameters:
+        - {$ref: '#/components/parameters/WalletId'}
+      responses:
+        '200': {description: Resultado da reconciliação}
+        '404': {description: Carteira não encontrada}
   /wagering/transactions:
     post:
       summary: Processa uma operação financeira
@@ -47,11 +87,82 @@ paths:
           in: header
           required: true
           schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TransacaoAposta'}
       responses:
         '200': {description: Processada ou replay}
         '409': {description: Conflito de idempotência}
         '422': {description: Rejeição de negócio}
+  /wagering/transactions/{transactionId}:
+    get:
+      summary: Consulta uma transação pelo identificador interno
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200': {description: Transação}
+        '404': {description: Não encontrada}
+  /providers/{providerId}/wagering/transactions/{externalTransactionId}:
+    get:
+      summary: Consulta uma transação pelo identificador externo
+      parameters:
+        - name: providerId
+          in: path
+          required: true
+          schema: {type: string}
+        - name: externalTransactionId
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Transação}
+        '403': {description: Provider não autorizado}
+        '404': {description: Não encontrada}
 components:
+  parameters:
+    WalletId:
+      name: walletId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+  schemas:
+    Dinheiro:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount: {type: string, example: '100.00'}
+        currency: {type: string, example: BRL}
+    CriarCarteira:
+      type: object
+      required: [playerId, initialBalance]
+      properties:
+        playerId: {type: string, format: uuid}
+        initialBalance: {$ref: '#/components/schemas/Dinheiro'}
+    Carteira:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        playerId: {type: string, format: uuid}
+        balance: {$ref: '#/components/schemas/Dinheiro'}
+        version: {type: integer, format: int64}
+    TransacaoAposta:
+      type: object
+      required: [providerId, externalTransactionId, walletId, playerId, roundId, gameId, kind, money]
+      properties:
+        providerId: {type: string}
+        externalTransactionId: {type: string}
+        walletId: {type: string, format: uuid}
+        playerId: {type: string, format: uuid}
+        roundId: {type: string}
+        gameId: {type: string}
+        kind: {type: string, enum: [BET, WIN, LOSS, REFUND, ROLLBACK]}
+        referenceExternalId: {type: string}
+        money: {$ref: '#/components/schemas/Dinheiro'}
   securitySchemes:
     bearerAuth:
       type: http
