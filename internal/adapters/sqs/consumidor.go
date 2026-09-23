@@ -17,8 +17,13 @@ type Deduplicador interface {
 	Concluir(context.Context, string, string) error
 }
 
+type ClienteMensagens interface {
+	ReceiveMessage(context.Context, *sqs.ReceiveMessageInput, ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error)
+	DeleteMessage(context.Context, *sqs.DeleteMessageInput, ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error)
+}
+
 type Consumidor struct {
-	Cliente        *sqs.Client
+	Cliente        ClienteMensagens
 	FilaURL        string
 	Tratador       TratadorMensagem
 	Inbox          Deduplicador
