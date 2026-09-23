@@ -318,9 +318,9 @@ func (s *Store) processarApostaNaTransacao(ctx context.Context, tx pgx.Tx, input
 	next := balance
 	direction := ""
 	if input.Kind == "REFUND" || input.Kind == "ROLLBACK" {
-		var refKind, refWallet, refCurrency, refStatus string
+		var refKind, refWallet, refCurrency, refStatus, refPlayer, refRound, refGame string
 		var refAmount int64
-		err = tx.QueryRow(ctx, "SELECT kind,wallet_id,currency,amount_minor,status FROM wagering_transactions WHERE provider_id=$1 AND external_transaction_id=$2 FOR UPDATE", input.ProviderID, input.ReferenceExternalID).Scan(&refKind, &refWallet, &refCurrency, &refAmount, &refStatus)
+		err = tx.QueryRow(ctx, "SELECT kind,wallet_id,currency,amount_minor,status,player_id,round_id,game_id FROM wagering_transactions WHERE provider_id=$1 AND external_transaction_id=$2 FOR UPDATE", input.ProviderID, input.ReferenceExternalID).Scan(&refKind, &refWallet, &refCurrency, &refAmount, &refStatus, &refPlayer, &refRound, &refGame)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				var pendenteID string
@@ -335,7 +335,7 @@ func (s *Store) processarApostaNaTransacao(ctx context.Context, tx pgx.Tx, input
 			}
 			return ResultadoAposta{}, errors.New("referencia nao encontrada")
 		}
-		if refStatus != "PROCESSED" || refWallet != input.WalletID || refCurrency != input.Money.Currency() || refAmount != amount {
+		if refStatus != "PROCESSED" || refWallet != input.WalletID || refPlayer != input.PlayerID || refRound != input.RoundID || refGame != input.GameID || refCurrency != input.Money.Currency() || refAmount != amount {
 			return ResultadoAposta{}, errors.New("referencia invalida")
 		}
 		var duplicadas int
@@ -385,7 +385,7 @@ func (s *Store) processarApostaNaTransacao(ctx context.Context, tx pgx.Tx, input
 		if _, err = tx.Exec(ctx, "INSERT INTO ledger_entries(wallet_id,transaction_id,direction,amount_minor,balance_before_minor,balance_after_minor) VALUES($1,$2,$3,$4,$5,$6)", input.WalletID, transactionID, direction, amount, balance, next); err != nil {
 			return ResultadoAposta{}, err
 		}
-		if err = inserirEvento(ctx, tx, eventos.NovoEnvelope("WalletBalanceChanged", input.WalletID, transactionID, map[string]any{"walletId": input.WalletID, "transactionId": transactionID, "direction": direction, "walletVersion": nextVersion})); err != nil {
+		if err = inserirEvento(ctx, tx, eventos.NovoEnvelope("WalletBalanceChanged", input.WalletID, transactionID, map[string]any{"walletId": input.WalletID, "transactionId": transactionID, "direction": direction, "money": map[string]string{"amount": input.Money.String(), "currency": input.Money.Currency()}, "balanceBefore": map[string]string{"amount": fmt.Sprintf("%d.%02d", balance/100, balance%100), "currency": walletCurrency}, "balanceAfter": map[string]string{"amount": fmt.Sprintf("%d.%02d", next/100, next%100), "currency": walletCurrency}, "walletVersion": nextVersion})); err != nil {
 			return ResultadoAposta{}, err
 		}
 	}
@@ -403,22 +403,22 @@ func (s *Store) Resolver(ctx context.Context, transactionID string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var provider, reference, kind, walletID, currency, status string
+	var provider, reference, kind, walletID, currency, status, player, round, game string
 	var amount int64
-	if err = tx.QueryRow(ctx, "SELECT provider_id,reference_external_id,kind,wallet_id,currency,amount_minor,status FROM wagering_transactions WHERE id=$1 FOR UPDATE", transactionID).
-		Scan(&provider, &reference, &kind, &walletID, &currency, &amount, &status); err != nil {
+	if err = tx.QueryRow(ctx, "SELECT provider_id,reference_external_id,kind,wallet_id,currency,amount_minor,status,player_id,round_id,game_id FROM wagering_transactions WHERE id=$1 FOR UPDATE", transactionID).
+		Scan(&provider, &reference, &kind, &walletID, &currency, &amount, &status, &player, &round, &game); err != nil {
 		return err
 	}
 	if status != "PENDING_REFERENCE" {
 		return nil
 	}
-	var originalKind, originalWallet, originalCurrency, originalStatus string
+	var originalKind, originalWallet, originalCurrency, originalStatus, originalPlayer, originalRound, originalGame string
 	var originalAmount int64
-	if err = tx.QueryRow(ctx, "SELECT kind,wallet_id,currency,amount_minor,status FROM wagering_transactions WHERE provider_id=$1 AND external_transaction_id=$2 FOR UPDATE", provider, reference).
-		Scan(&originalKind, &originalWallet, &originalCurrency, &originalAmount, &originalStatus); err != nil {
+	if err = tx.QueryRow(ctx, "SELECT kind,wallet_id,currency,amount_minor,status,player_id,round_id,game_id FROM wagering_transactions WHERE provider_id=$1 AND external_transaction_id=$2 FOR UPDATE", provider, reference).
+		Scan(&originalKind, &originalWallet, &originalCurrency, &originalAmount, &originalStatus, &originalPlayer, &originalRound, &originalGame); err != nil {
 		return err
 	}
-	if originalStatus != "PROCESSED" || originalWallet != walletID || originalCurrency != currency || originalAmount != amount || (kind == "REFUND" && originalKind != "BET") {
+	if originalStatus != "PROCESSED" || originalWallet != walletID || originalPlayer != player || originalRound != round || originalGame != game || originalCurrency != currency || originalAmount != amount || (kind == "REFUND" && originalKind != "BET") {
 		return errors.New("referencia invalida")
 	}
 	var balance, version int64
