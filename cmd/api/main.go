@@ -23,8 +23,10 @@ func main() {
 	}
 	mux := http.NewServeMux()
 	databaseURL := os.Getenv("DATABASE_URL")
+	var db *store.Store
 	if databaseURL != "" {
-		db, err := store.New(context.Background(), databaseURL)
+		var err error
+		db, err = store.New(context.Background(), databaseURL)
 		if err != nil {
 			slog.Error("database unavailable", "error", err)
 			os.Exit(1)
@@ -124,7 +126,15 @@ func main() {
 		})
 	}
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
-	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ready"}) })
+	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
+		if db != nil {
+			if err := db.Ping(r.Context()); err != nil {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready"})
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+	})
 	server := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {

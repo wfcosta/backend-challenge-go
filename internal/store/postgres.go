@@ -66,6 +66,8 @@ func New(ctx context.Context, databaseURL string) (*Store, error) {
 
 func (s *Store) Close() { s.pool.Close() }
 
+func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
+
 func (s *Store) CreateWallet(ctx context.Context, playerID string, money domain.Money) (Wallet, error) {
 	var w Wallet
 	var minor int64
