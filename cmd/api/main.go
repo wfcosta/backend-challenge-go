@@ -91,29 +91,27 @@ func main() {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing Idempotency-Key"})
 				return
 			}
-			var raw struct {
-				ProviderID string
-				ExternalID string
-				PlayerID   string
-				WalletID   string
-				RoundID    string
-				GameID     string
-				Kind       string
-				Money      struct {
-					Amount   string
-					Currency string
-				}
-			}
+			var raw map[string]any
 			if json.NewDecoder(r.Body).Decode(&raw) != nil {
 				writeJSON(w, 400, map[string]string{"error": "invalid request"})
 				return
 			}
-			money, err := domain.NewMoney(raw.Money.Amount, raw.Money.Currency)
+			providerID, _ := raw["providerId"].(string)
+			externalID, _ := raw["externalTransactionId"].(string)
+			playerID, _ := raw["playerId"].(string)
+			walletID, _ := raw["walletId"].(string)
+			roundID, _ := raw["roundId"].(string)
+			gameID, _ := raw["gameId"].(string)
+			kind, _ := raw["kind"].(string)
+			dinheiro, _ := raw["money"].(map[string]any)
+			amount, _ := dinheiro["amount"].(string)
+			currency, _ := dinheiro["currency"].(string)
+			money, err := domain.NewMoney(amount, currency)
 			if err != nil {
 				writeJSON(w, 400, map[string]string{"error": err.Error()})
 				return
 			}
-			result, err := db.ProcessarAposta(r.Context(), application.EntradaAposta{ProviderID: raw.ProviderID, ExternalID: raw.ExternalID, PlayerID: raw.PlayerID, WalletID: raw.WalletID, RoundID: raw.RoundID, GameID: raw.GameID, Kind: raw.Kind, Money: money}, key)
+			result, err := db.ProcessarAposta(r.Context(), application.EntradaAposta{ProviderID: providerID, ExternalID: externalID, PlayerID: playerID, WalletID: walletID, RoundID: roundID, GameID: gameID, Kind: kind, Money: money}, key)
 			if err != nil {
 				if errors.Is(err, application.ErroConflitoIdempotencia) {
 					writeJSON(w, 409, map[string]string{"error": err.Error()})
