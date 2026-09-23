@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -356,6 +357,39 @@ func (s *Store) ProcessarAposta(ctx context.Context, input application.EntradaAp
 	}
 	resultMoney, _ := domain.NewMoney(fmt.Sprintf("%d.%02d", next/100, next%100), walletCurrency)
 	return ResultadoAposta{ID: transactionID, Status: status, Balance: resultMoney}, nil
+}
+
+func (s *Store) Tratar(ctx context.Context, _ string, corpo string) error {
+	var envelope map[string]any
+	if err := json.Unmarshal([]byte(corpo), &envelope); err != nil {
+		return err
+	}
+	dados, ok := envelope["data"].(map[string]any)
+	if !ok {
+		dados = envelope
+	}
+	dinheiro, _ := dados["money"].(map[string]any)
+	amount, _ := dinheiro["amount"].(string)
+	currency, _ := dinheiro["currency"].(string)
+	money, err := domain.NewMoney(amount, currency)
+	if err != nil {
+		return err
+	}
+	chave, _ := dados["idempotencyKey"].(string)
+	entrada := application.EntradaAposta{}
+	entrada.ProviderID, _ = dados["providerId"].(string)
+	entrada.ExternalID, _ = dados["externalTransactionId"].(string)
+	entrada.PlayerID, _ = dados["playerId"].(string)
+	entrada.WalletID, _ = dados["walletId"].(string)
+	entrada.RoundID, _ = dados["roundId"].(string)
+	entrada.GameID, _ = dados["gameId"].(string)
+	entrada.Kind, _ = dados["kind"].(string)
+	entrada.Money = money
+	if chave == "" {
+		return errors.New("idempotency key ausente")
+	}
+	_, err = s.ProcessarAposta(ctx, entrada, chave)
+	return err
 }
 
 func inserirEvento(ctx context.Context, tx pgx.Tx, envelope eventos.Envelope) error {

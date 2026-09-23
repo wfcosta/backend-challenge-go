@@ -186,6 +186,8 @@ func main() {
 		cancelarWorkers = cancelar
 		publicador := worker.PublicadorOutbox{Banco: db.Pool(), Transporte: adaptadorsqs.Publicador{Cliente: cliente, FilaURL: os.Getenv("SQS_QUEUE_URL")}, Intervalo: time.Second}
 		go publicador.Executar(ctxWorkers)
+		consumidor := adaptadorsqs.Consumidor{Cliente: cliente, FilaURL: os.Getenv("SQS_QUEUE_URL"), Tratador: db, Inbox: db, NomeConsumidor: "apostas"}
+		go consumidor.Executar(ctxWorkers)
 	}
 	if cancelarWorkers != nil {
 		defer cancelarWorkers()
