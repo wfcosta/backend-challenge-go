@@ -55,6 +55,18 @@ func TestAPIComCompose(t *testing.T) {
 	if resposta.StatusCode != http.StatusBadRequest {
 		t.Fatalf("idempotência obrigatória: %d", resposta.StatusCode)
 	}
+	req, _ = http.NewRequest(http.MethodPost, base+"/wagering/transactions", strings.NewReader(`{"providerId":"provider-a","externalTransactionId":"invalida","walletId":"00000000-0000-0000-0000-000000000001","playerId":"00000000-0000-0000-0000-000000000002","kind":"BET","money":{"amount":"abc","currency":"BRL"}}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Idempotency-Key", "entrada-invalida")
+	req.Header.Set("Content-Type", "application/json")
+	resposta, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resposta.Body.Close()
+	if resposta.StatusCode != http.StatusBadRequest {
+		t.Fatalf("valor monetário inválido: %d", resposta.StatusCode)
+	}
 }
 
 func TestProviderNaoAcessaOutroProvider(t *testing.T) {
