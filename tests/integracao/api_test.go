@@ -90,6 +90,20 @@ func TestProviderNaoAcessaOutroProvider(t *testing.T) {
 	if resposta.StatusCode != http.StatusForbidden {
 		t.Fatalf("consulta: status esperado 403, recebido %d", resposta.StatusCode)
 	}
+
+	carteira, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:8081/wallets/00000000-0000-0000-0000-000000000001", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	carteira.Header.Set("Authorization", "Bearer "+accessToken)
+	resposta, err = http.DefaultClient.Do(carteira)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resposta.Body.Close()
+	if resposta.StatusCode != http.StatusForbidden {
+		t.Fatalf("carteira com token provider: status esperado 403, recebido %d", resposta.StatusCode)
+	}
 }
 
 func TestIdempotenciaConcorrenteProcessaUmaVez(t *testing.T) {
