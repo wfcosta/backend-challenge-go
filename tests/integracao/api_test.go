@@ -237,6 +237,65 @@ func TestDuasApostasConcorrentesRespeitamSaldo(t *testing.T) {
 	}
 }
 
+func TestLedgerEReconcilacaoDaCarteira(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "true" {
+		t.Skip("defina INTEGRATION=true")
+	}
+	token := obterToken(t, "wallet-internal", "internal-secret")
+	playerID := "00000000-0000-0000-0000-" + fmt.Sprintf("%012d", (time.Now().UnixNano()+2)%1000000000000)
+	corpo := `{"playerId":"` + playerID + `","initialBalance":{"amount":"25.00","currency":"BRL"}}`
+	req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8081/wallets", strings.NewReader(corpo))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resposta, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var carteira struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resposta.Body).Decode(&carteira); err != nil {
+		resposta.Body.Close()
+		t.Fatal(err)
+	}
+	resposta.Body.Close()
+	if resposta.StatusCode != http.StatusCreated {
+		t.Fatalf("criação da carteira: %d", resposta.StatusCode)
+	}
+
+	ledger, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:8081/wallets/"+carteira.ID+"/ledger", nil)
+	ledger.Header.Set("Authorization", "Bearer "+token)
+	resposta, err = http.DefaultClient.Do(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resposta.StatusCode != http.StatusOK {
+		resposta.Body.Close()
+		t.Fatalf("ledger: %d", resposta.StatusCode)
+	}
+	resposta.Body.Close()
+
+	reconciliacao, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8081/wallets/"+carteira.ID+"/reconciliation", nil)
+	reconciliacao.Header.Set("Authorization", "Bearer "+token)
+	resposta, err = http.DefaultClient.Do(reconciliacao)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resposta.Body.Close()
+	if resposta.StatusCode != http.StatusOK {
+		t.Fatalf("reconciliação: %d", resposta.StatusCode)
+	}
+	var resultado struct {
+		Consistente bool `json:"consistent"`
+	}
+	if err := json.NewDecoder(resposta.Body).Decode(&resultado); err != nil {
+		t.Fatal(err)
+	}
+	if !resultado.Consistente {
+		t.Fatal("reconciliação deveria estar consistente")
+	}
+}
+
 func obterToken(t *testing.T, cliente, segredo string) string {
 	t.Helper()
 	form := url.Values{"client_id": {cliente}, "client_secret": {segredo}, "grant_type": {"client_credentials"}}
