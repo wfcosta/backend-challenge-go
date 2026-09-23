@@ -10,9 +10,9 @@ import (
 	"github.com/wfcosta/backend-challenge-go/internal/domain"
 )
 
-var ErrIdempotencyConflict = errors.New("conflito de payload da idempotencia")
+var ErroConflitoIdempotencia = errors.New("conflito de payload da idempotencia")
 
-type WagerInput struct {
+type EntradaAposta struct {
 	ProviderID          string
 	ExternalID          string
 	PlayerID            string
@@ -24,13 +24,13 @@ type WagerInput struct {
 	ReferenceExternalID string
 }
 
-func PayloadHash(input WagerInput) string {
+func HashPayload(input EntradaAposta) string {
 	b, _ := json.Marshal([]string{input.ProviderID, input.ExternalID, input.PlayerID, input.WalletID, input.RoundID, input.GameID, input.Kind, input.Money.String(), input.Money.Currency(), input.ReferenceExternalID})
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
 
-func ValidateWager(input WagerInput) error {
+func ValidarAposta(input EntradaAposta) error {
 	switch input.Kind {
 	case "BET", "WIN":
 		if input.Money.IsZero() {

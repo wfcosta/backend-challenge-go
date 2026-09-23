@@ -88,9 +88,9 @@ func main() {
 				writeJSON(w, 400, map[string]string{"error": err.Error()})
 				return
 			}
-			result, err := db.ProcessarAposta(r.Context(), application.WagerInput{ProviderID: raw.ProviderID, ExternalID: raw.ExternalID, PlayerID: raw.PlayerID, WalletID: raw.WalletID, RoundID: raw.RoundID, GameID: raw.GameID, Kind: raw.Kind, Money: money}, key)
+			result, err := db.ProcessarAposta(r.Context(), application.EntradaAposta{ProviderID: raw.ProviderID, ExternalID: raw.ExternalID, PlayerID: raw.PlayerID, WalletID: raw.WalletID, RoundID: raw.RoundID, GameID: raw.GameID, Kind: raw.Kind, Money: money}, key)
 			if err != nil {
-				if errors.Is(err, application.ErrIdempotencyConflict) {
+				if errors.Is(err, application.ErroConflitoIdempotencia) {
 					writeJSON(w, 409, map[string]string{"error": err.Error()})
 					return
 				}

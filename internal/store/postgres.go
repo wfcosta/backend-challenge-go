@@ -81,11 +81,11 @@ func (s *Store) GetWallet(ctx context.Context, id string) (Wallet, error) {
 	return w, nil
 }
 
-func (s *Store) ProcessarAposta(ctx context.Context, input application.WagerInput, idempotencyKey string) (ResultadoAposta, error) {
-	if err := application.ValidateWager(input); err != nil {
+func (s *Store) ProcessarAposta(ctx context.Context, input application.EntradaAposta, idempotencyKey string) (ResultadoAposta, error) {
+	if err := application.ValidarAposta(input); err != nil {
 		return ResultadoAposta{}, err
 	}
-	hash := application.PayloadHash(input)
+	hash := application.HashPayload(input)
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return ResultadoAposta{}, err
@@ -100,7 +100,7 @@ func (s *Store) ProcessarAposta(ctx context.Context, input application.WagerInpu
 		Scan(&existing.ID, &existing.Status, &minor, &currency, &storedHash, &existing.FailureCode)
 	if err == nil {
 		if storedHash != hash {
-			return ResultadoAposta{}, application.ErrIdempotencyConflict
+			return ResultadoAposta{}, application.ErroConflitoIdempotencia
 		}
 		existing.Replay = true
 		existing.Balance, _ = domain.NewMoney(fmt.Sprintf("%d.%02d", minor/100, minor%100), currency)
