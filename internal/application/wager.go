@@ -10,7 +10,7 @@ import (
 	"github.com/wfcosta/backend-challenge-go/internal/domain"
 )
 
-var ErrIdempotencyConflict = errors.New("idempotency payload conflict")
+var ErrIdempotencyConflict = errors.New("conflito de payload da idempotencia")
 
 type WagerInput struct {
 	ProviderID          string
@@ -34,17 +34,17 @@ func ValidateWager(input WagerInput) error {
 	switch input.Kind {
 	case "BET", "WIN":
 		if input.Money.IsZero() {
-			return fmt.Errorf("%w: operation requires positive amount", domain.ErrInvalidMoney)
+			return fmt.Errorf("%w: a operacao exige valor positivo", domain.ErrInvalidMoney)
 		}
 	case "LOSS":
 		if !input.Money.IsZero() {
-			return fmt.Errorf("%w: loss requires zero amount", domain.ErrInvalidMoney)
+			return fmt.Errorf("%w: LOSS exige valor zero", domain.ErrInvalidMoney)
 		}
 	default:
-		return fmt.Errorf("unsupported wager kind %q", input.Kind)
+		return fmt.Errorf("tipo de aposta nao suportado: %q", input.Kind)
 	}
 	if input.ProviderID == "" || input.ExternalID == "" || input.WalletID == "" {
-		return errors.New("missing wager identity")
+		return errors.New("identidade da aposta ausente")
 	}
 	return nil
 }
