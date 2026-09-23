@@ -413,6 +413,9 @@ func TestFluxoRefundComReferencia(t *testing.T) {
 	if status := enviar("refund-"+playerID, "REFUND", "20.00", original); status != http.StatusOK {
 		t.Fatalf("REFUND: %d", status)
 	}
+	if status := enviar("refund-duplicado-"+playerID, "REFUND", "20.00", original); status != http.StatusUnprocessableEntity {
+		t.Fatalf("REFUND duplicado: status esperado 422, recebido %d", status)
+	}
 }
 
 func obterToken(t *testing.T, cliente, segredo string) string {
