@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -207,6 +208,7 @@ func main() {
 		os.Exit(1)
 	}
 	var cancelarWorkers context.CancelFunc
+	var workers sync.WaitGroup
 	if db != nil && os.Getenv("SQS_ENDPOINT") != "" && os.Getenv("SQS_QUEUE_URL") != "" {
 		cliente, err := adaptadorsqs.NovoCliente(context.Background(), os.Getenv("AWS_REGION"), os.Getenv("SQS_ENDPOINT"))
 		if err != nil {
@@ -220,10 +222,16 @@ func main() {
 			filaEventos = os.Getenv("SQS_QUEUE_URL")
 		}
 		publicador := worker.PublicadorOutbox{Banco: db.Pool(), Transporte: adaptadorsqs.Publicador{Cliente: cliente, FilaURL: filaEventos}, Intervalo: time.Second}
-		go publicador.Executar(ctxWorkers)
+		workers.Add(1)
+		go func() { defer workers.Done(); publicador.Executar(ctxWorkers) }()
 		consumidor := adaptadorsqs.Consumidor{Cliente: cliente, FilaURL: os.Getenv("SQS_QUEUE_URL"), Tratador: db, Inbox: db, NomeConsumidor: "apostas"}
-		go consumidor.Executar(ctxWorkers)
-		go (worker.TrabalhadorReferencias{Banco: db.Pool(), Resolutor: db, Intervalo: 2 * time.Second}).Executar(ctxWorkers)
+		workers.Add(1)
+		go func() { defer workers.Done(); consumidor.Executar(ctxWorkers) }()
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			(worker.TrabalhadorReferencias{Banco: db.Pool(), Resolutor: db, Intervalo: 2 * time.Second}).Executar(ctxWorkers)
+		}()
 	}
 	if cancelarWorkers != nil {
 		defer cancelarWorkers()
@@ -249,6 +257,10 @@ func main() {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
+	if cancelarWorkers != nil {
+		cancelarWorkers()
+		workers.Wait()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = aplicacao.Stop(ctx)
