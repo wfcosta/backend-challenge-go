@@ -277,6 +277,20 @@ func (s *Store) ProcessarAposta(ctx context.Context, input application.EntradaAp
 		var refAmount int64
 		err = tx.QueryRow(ctx, "SELECT kind,wallet_id,currency,amount_minor,status FROM wagering_transactions WHERE provider_id=$1 AND external_transaction_id=$2 FOR UPDATE", input.ProviderID, input.ReferenceExternalID).Scan(&refKind, &refWallet, &refCurrency, &refAmount, &refStatus)
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				var pendenteID string
+				err = tx.QueryRow(ctx, "INSERT INTO wagering_transactions(provider_id,external_transaction_id,idempotency_key,payload_hash,wallet_id,player_id,round_id,game_id,kind,amount_minor,currency,reference_external_id,status,result_balance_minor,result_wallet_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'PENDING_REFERENCE',$13,$14) RETURNING id", input.ProviderID, input.ExternalID, idempotencyKey, hash, input.WalletID, input.PlayerID, input.RoundID, input.GameID, input.Kind, amount, input.Money.Currency(), input.ReferenceExternalID, balance, version).Scan(&pendenteID)
+				if err != nil {
+					return ResultadoAposta{}, err
+				}
+				if err = inserirEvento(ctx, tx, eventos.NovoEnvelope("WagerTransactionPendingReference", pendenteID, pendenteID, map[string]any{"transactionId": pendenteID, "referenceExternalTransactionId": input.ReferenceExternalID})); err != nil {
+					return ResultadoAposta{}, err
+				}
+				if err = tx.Commit(ctx); err != nil {
+					return ResultadoAposta{}, err
+				}
+				return ResultadoAposta{ID: pendenteID, Status: "PENDING_REFERENCE", Balance: domain.NewInternalMoney(balance, walletCurrency)}, nil
+			}
 			return ResultadoAposta{}, errors.New("referencia nao encontrada")
 		}
 		if refStatus != "PROCESSED" || refWallet != input.WalletID || refCurrency != input.Money.Currency() || refAmount != amount {
