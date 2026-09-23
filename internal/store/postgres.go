@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wfcosta/backend-challenge-go/internal/application"
 	"github.com/wfcosta/backend-challenge-go/internal/domain"
+	"github.com/wfcosta/backend-challenge-go/internal/eventos"
 )
 
 var ErrWalletExists = errors.New("wallet already exists")
@@ -118,6 +120,12 @@ func (s *Store) CreateWallet(ctx context.Context, playerID string, money domain.
 			return Wallet{}, err
 		}
 		if _, err = tx.Exec(ctx, "INSERT INTO ledger_entries(wallet_id,transaction_id,direction,amount_minor,balance_before_minor,balance_after_minor) VALUES($1,$2,'CREDIT',$3,0,$3)", w.ID, transactionID, minor); err != nil {
+			return Wallet{}, err
+		}
+		if err = inserirEvento(ctx, tx, eventos.NovoEnvelope("WagerTransactionProcessed", transactionID, transactionID, map[string]any{"transactionId": transactionID, "status": "PROCESSED"})); err != nil {
+			return Wallet{}, err
+		}
+		if err = inserirEvento(ctx, tx, eventos.NovoEnvelope("WalletBalanceChanged", w.ID, transactionID, map[string]any{"walletId": w.ID, "transactionId": transactionID, "direction": "CREDIT", "money": map[string]string{"amount": money.String(), "currency": money.Currency()}, "balanceBefore": map[string]string{"amount": "0.00", "currency": money.Currency()}, "balanceAfter": map[string]string{"amount": money.String(), "currency": money.Currency()}, "walletVersion": 1})); err != nil {
 			return Wallet{}, err
 		}
 	}
@@ -274,10 +282,25 @@ func (s *Store) ProcessarAposta(ctx context.Context, input application.EntradaAp
 		if _, err = tx.Exec(ctx, "INSERT INTO ledger_entries(wallet_id,transaction_id,direction,amount_minor,balance_before_minor,balance_after_minor) VALUES($1,$2,$3,$4,$5,$6)", input.WalletID, transactionID, direction, amount, balance, next); err != nil {
 			return ResultadoAposta{}, err
 		}
+		if err = inserirEvento(ctx, tx, eventos.NovoEnvelope("WalletBalanceChanged", input.WalletID, transactionID, map[string]any{"walletId": input.WalletID, "transactionId": transactionID, "direction": direction, "walletVersion": nextVersion})); err != nil {
+			return ResultadoAposta{}, err
+		}
+	}
+	if err = inserirEvento(ctx, tx, eventos.NovoEnvelope("WagerTransactionProcessed", transactionID, transactionID, map[string]any{"transactionId": transactionID, "status": status, "kind": input.Kind})); err != nil {
+		return ResultadoAposta{}, err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return ResultadoAposta{}, err
 	}
 	resultMoney, _ := domain.NewMoney(fmt.Sprintf("%d.%02d", next/100, next%100), walletCurrency)
 	return ResultadoAposta{ID: transactionID, Status: status, Balance: resultMoney}, nil
+}
+
+func inserirEvento(ctx context.Context, tx pgx.Tx, envelope eventos.Envelope) error {
+	payload, err := envelope.JSON()
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, "INSERT INTO outbox_events(event_id,aggregate_id,event_type,payload,occurred_at) VALUES($1,$2,$3,$4,$5)", envelope.IdEvento, envelope.IdAgregado, envelope.Tipo, payload, envelope.OcorridoEm)
+	return err
 }
