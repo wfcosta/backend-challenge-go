@@ -36,3 +36,10 @@ func TestMoneyRejectsDifferentCurrencies(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestMoneyInternoNegativoSerializaCorretamente(t *testing.T) {
+	m := NewInternalMoney(-25, "BRL")
+	if m.String() != "-0.25" {
+		t.Fatalf("valor=%s", m.String())
+	}
+}

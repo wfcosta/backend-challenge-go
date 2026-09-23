@@ -58,6 +58,10 @@ func (m Money) Currency() string { return m.currency }
 func (m Money) Minor() int64     { return m.minor }
 func (m Money) IsZero() bool     { return m.minor == 0 }
 func (m Money) String() string {
+	if m.minor < 0 {
+		valor := -m.minor
+		return fmt.Sprintf("-%d.%02d", valor/100, valor%100)
+	}
 	return fmt.Sprintf("%d.%02d", m.minor/100, m.minor%100)
 }
 func (m Money) Add(other Money) (Money, error) {
