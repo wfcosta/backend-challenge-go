@@ -62,5 +62,44 @@ Para executar a integração contra o Compose:
 
     INTEGRATION=true go test ./tests/integracao -v
 
+### Operação das filas e banco
+
+As filas FIFO são criadas pelo serviço `filas`: `wager-transactions.fifo` e sua DLQ `wager-transactions-dlq.fifo`. Para confirmar o provisionamento:
+
+```bash
+AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1 \
+  aws --endpoint-url http://localhost:4566 sqs list-queues
+```
+
+As migrations são executadas automaticamente pelo serviço `migrate`. Para recriar todo o ambiente local, removendo dados de PostgreSQL, Keycloak e LocalStack:
+
+```bash
+docker compose down -v
+docker compose up --build -d
+docker compose ps
+```
+
+### Teste manual dos endpoints
+
+Depois de obter um token de provider, envie uma transação com `Idempotency-Key`:
+
+```bash
+curl -X POST http://localhost:8081/wagering/transactions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: exemplo-1' \
+  -d '{"providerId":"provider-a","externalTransactionId":"exemplo-1","walletId":"WALLET_ID","playerId":"PLAYER_ID","roundId":"round-1","gameId":"game-1","kind":"BET","money":{"amount":"10.00","currency":"BRL"}}'
+```
+
+Consultas usam `GET /wagering/transactions/{transactionId}` ou `GET /providers/{providerId}/wagering/transactions/{externalTransactionId}`. Carteiras e ledger exigem token do client `wallet-internal`:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN_INTERNO" http://localhost:8081/wallets/WALLET_ID
+curl -H "Authorization: Bearer $TOKEN_INTERNO" http://localhost:8081/wallets/WALLET_ID/ledger
+curl -X POST -H "Authorization: Bearer $TOKEN_INTERNO" http://localhost:8081/wallets/WALLET_ID/reconciliation
+```
+
+Em caso de falha, verifique `docker compose ps`, `docker compose logs app`, `docker compose logs migrate` e os endpoints de health. O endpoint `/metrics` ajuda a identificar volume de requisições, erros, duplicidades e eventos publicados.
+
 ## Documentação
 spec.md contém requisitos funcionais; spec tecnica.md contém arquitetura técnica; plan.md contém tarefas/BDD; ARCHITECTURE.md contém decisões e diagramas; docs/architecture.md explica a correspondência com Controller/Service/Entity do Java; docs/openapi.yaml é o contrato Swagger/OpenAPI.
