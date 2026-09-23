@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -232,7 +233,20 @@ func main() {
 }
 
 func autenticarRotas(proximo http.Handler, autenticador *auth.Autenticador) http.Handler {
-	protegido := autenticador.Middleware(proximo)
+	protegido := autenticador.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/wallets") {
+			if !auth.TemPapel(r.Context(), "internal:wallets") {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "papel interno obrigatorio"})
+				return
+			}
+		} else if strings.HasPrefix(r.URL.Path, "/wagering/") || strings.HasPrefix(r.URL.Path, "/providers/") {
+			if !auth.TemPapel(r.Context(), "provider:transactions") {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "papel de provider obrigatorio"})
+				return
+			}
+		}
+		proximo.ServeHTTP(w, r)
+	}))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health/live" || r.URL.Path == "/health/ready" || r.URL.Path == "/metrics" {
 			proximo.ServeHTTP(w, r)

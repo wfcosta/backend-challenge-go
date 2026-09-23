@@ -30,6 +30,43 @@ func Provedor(ctx context.Context) string {
 	return ""
 }
 
+// TemPapel verifica papeis do realm e papeis de cliente presentes no token.
+// O azp e usado apenas como compatibilidade com os clients locais exportados.
+func TemPapel(ctx context.Context, papel string) bool {
+	token, ok := ctx.Value(Identidade).(*oidc.IDToken)
+	if !ok {
+		return false
+	}
+	var claims struct {
+		RealmAccess struct {
+			Roles []string `json:"roles"`
+		} `json:"realm_access"`
+		ResourceAccess map[string]struct {
+			Roles []string `json:"roles"`
+		} `json:"resource_access"`
+		Azp string `json:"azp"`
+	}
+	if token.Claims(&claims) != nil {
+		return false
+	}
+	for _, role := range claims.RealmAccess.Roles {
+		if role == papel {
+			return true
+		}
+	}
+	for _, acesso := range claims.ResourceAccess {
+		for _, role := range acesso.Roles {
+			if role == papel {
+				return true
+			}
+		}
+	}
+	if papel == "internal:wallets" && claims.Azp == "wallet-internal" {
+		return true
+	}
+	return papel == "provider:transactions" && (claims.Azp == "provider-a" || claims.Azp == "provider-b")
+}
+
 type Autenticador struct {
 	issuer      string
 	audience    string
