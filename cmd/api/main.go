@@ -234,7 +234,7 @@ func main() {
 func autenticarRotas(proximo http.Handler, autenticador *auth.Autenticador) http.Handler {
 	protegido := autenticador.Middleware(proximo)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health/live" || r.URL.Path == "/health/ready" {
+		if r.URL.Path == "/health/live" || r.URL.Path == "/health/ready" || r.URL.Path == "/metrics" {
 			proximo.ServeHTTP(w, r)
 			return
 		}
