@@ -26,6 +26,20 @@ services:
       SERVICES: sqs
       AWS_DEFAULT_REGION: us-east-1
     ports: ["4566:4566"]
+  filas:
+    image: amazon/aws-cli:2.17.14
+    environment:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+    depends_on:
+      localstack: {condition: service_started}
+    entrypoint: ["/bin/sh","-c"]
+    command:
+      - |
+        until aws --endpoint-url http://localstack:4566 sqs list-queues >/dev/null 2>&1; do sleep 2; done
+        aws --endpoint-url http://localstack:4566 sqs create-queue --queue-name wager-transactions-dlq.fifo --attributes FifoQueue=true,ContentBasedDeduplication=true || true
+        aws --endpoint-url http://localstack:4566 sqs create-queue --queue-name wager-transactions.fifo --attributes '{"FifoQueue":"true","ContentBasedDeduplication":"true","RedrivePolicy":"{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:000000000000:wager-transactions-dlq.fifo\",\"maxReceiveCount\":\"5\"}"}' || true
   migrate:
     image: migrate/migrate:v4.17.1
     volumes:
