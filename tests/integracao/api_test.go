@@ -435,7 +435,7 @@ func TestFluxoRefundComReferencia(t *testing.T) {
 	}
 	original := "refund-original-" + playerID
 	pendente := "refund-pendente-" + playerID
-	if status := enviar(pendente, "REFUND", "20.00", "referencia-que-ainda-nao-existe"); status != http.StatusOK {
+	if status := enviar(pendente, "REFUND", "20.00", original); status != http.StatusOK {
 		t.Fatalf("REFUND pendente: %d", status)
 	}
 	consultaPendente, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:8081/providers/provider-a/wagering/transactions/"+pendente, nil)
@@ -458,8 +458,23 @@ func TestFluxoRefundComReferencia(t *testing.T) {
 	if status := enviar(original, "BET", "20.00", ""); status != http.StatusOK {
 		t.Fatalf("BET: %d", status)
 	}
-	if status := enviar("refund-"+playerID, "REFUND", "20.00", original); status != http.StatusOK {
-		t.Fatalf("REFUND: %d", status)
+	time.Sleep(3 * time.Second)
+	consultaResolvida, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:8081/providers/provider-a/wagering/transactions/"+pendente, nil)
+	consultaResolvida.Header.Set("Authorization", "Bearer "+provider)
+	resposta, err = http.DefaultClient.Do(consultaResolvida)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resolvida struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(resposta.Body).Decode(&resolvida); err != nil {
+		resposta.Body.Close()
+		t.Fatal(err)
+	}
+	resposta.Body.Close()
+	if resolvida.Status != "PROCESSED" {
+		t.Fatalf("referência não resolvida: %s", resolvida.Status)
 	}
 	if status := enviar("refund-duplicado-"+playerID, "REFUND", "20.00", original); status != http.StatusUnprocessableEntity {
 		t.Fatalf("REFUND duplicado: status esperado 422, recebido %d", status)

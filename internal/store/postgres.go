@@ -381,6 +381,60 @@ func (s *Store) ProcessarAposta(ctx context.Context, input application.EntradaAp
 	return ResultadoAposta{ID: transactionID, Status: status, Balance: resultMoney}, nil
 }
 
+// Resolver tenta concluir uma reversão que chegou antes da operação original.
+func (s *Store) Resolver(ctx context.Context, transactionID string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var provider, reference, kind, walletID, currency, status string
+	var amount int64
+	if err = tx.QueryRow(ctx, "SELECT provider_id,reference_external_id,kind,wallet_id,currency,amount_minor,status FROM wagering_transactions WHERE id=$1 FOR UPDATE", transactionID).
+		Scan(&provider, &reference, &kind, &walletID, &currency, &amount, &status); err != nil {
+		return err
+	}
+	if status != "PENDING_REFERENCE" {
+		return nil
+	}
+	var originalKind, originalWallet, originalCurrency, originalStatus string
+	var originalAmount int64
+	if err = tx.QueryRow(ctx, "SELECT kind,wallet_id,currency,amount_minor,status FROM wagering_transactions WHERE provider_id=$1 AND external_transaction_id=$2 FOR UPDATE", provider, reference).
+		Scan(&originalKind, &originalWallet, &originalCurrency, &originalAmount, &originalStatus); err != nil {
+		return err
+	}
+	if originalStatus != "PROCESSED" || originalWallet != walletID || originalCurrency != currency || originalAmount != amount || (kind == "REFUND" && originalKind != "BET") {
+		return errors.New("referencia invalida")
+	}
+	var balance, version int64
+	if err = tx.QueryRow(ctx, "SELECT balance_minor,version FROM wallets WHERE id=$1 FOR UPDATE", walletID).Scan(&balance, &version); err != nil {
+		return err
+	}
+	next := balance + amount
+	direction := "CREDIT"
+	if kind == "ROLLBACK" {
+		if amount > balance {
+			return errors.New("saldo insuficiente para reversao")
+		}
+		next = balance - amount
+		direction = "DEBIT"
+	}
+	nextVersion := version + 1
+	if _, err = tx.Exec(ctx, "UPDATE wagering_transactions SET status='PROCESSED',result_balance_minor=$1,result_wallet_version=$2,updated_at=now() WHERE id=$3", next, nextVersion, transactionID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, "UPDATE wallets SET balance_minor=$1,version=$2,updated_at=now() WHERE id=$3", next, nextVersion, walletID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, "INSERT INTO ledger_entries(wallet_id,transaction_id,direction,amount_minor,balance_before_minor,balance_after_minor) VALUES($1,$2,$3,$4,$5,$6)", walletID, transactionID, direction, amount, balance, next); err != nil {
+		return err
+	}
+	if err = inserirEvento(ctx, tx, eventos.NovoEnvelope("WagerTransactionProcessed", transactionID, transactionID, map[string]any{"transactionId": transactionID, "status": "PROCESSED", "kind": kind})); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 func (s *Store) Tratar(ctx context.Context, _ string, corpo string) error {
 	var envelope map[string]any
 	if err := json.Unmarshal([]byte(corpo), &envelope); err != nil {

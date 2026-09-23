@@ -203,6 +203,7 @@ func main() {
 		go publicador.Executar(ctxWorkers)
 		consumidor := adaptadorsqs.Consumidor{Cliente: cliente, FilaURL: os.Getenv("SQS_QUEUE_URL"), Tratador: db, Inbox: db, NomeConsumidor: "apostas"}
 		go consumidor.Executar(ctxWorkers)
+		go (worker.TrabalhadorReferencias{Banco: db.Pool(), Resolutor: db, Intervalo: 2 * time.Second}).Executar(ctxWorkers)
 	}
 	if cancelarWorkers != nil {
 		defer cancelarWorkers()
