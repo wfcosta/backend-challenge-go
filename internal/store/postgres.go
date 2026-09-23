@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -99,6 +101,22 @@ func New(ctx context.Context, databaseURL string) (*Store, error) {
 func (s *Store) Close() { s.pool.Close() }
 
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
+
+func (s *Store) Registrar(ctx context.Context, consumidor, mensagemID, corpo string) (bool, error) {
+	hash := sha256.Sum256([]byte(corpo))
+	valor := hex.EncodeToString(hash[:])
+	var inserido bool
+	err := s.pool.QueryRow(ctx, "INSERT INTO inbox_messages(consumer_name,message_id,payload_hash) VALUES($1,$2,$3) ON CONFLICT (consumer_name,message_id) DO UPDATE SET payload_hash=inbox_messages.payload_hash RETURNING payload_hash=$3", consumidor, mensagemID, valor).Scan(&inserido)
+	if err != nil {
+		return false, err
+	}
+	return inserido, nil
+}
+
+func (s *Store) Concluir(ctx context.Context, consumidor, mensagemID string) error {
+	_, err := s.pool.Exec(ctx, "UPDATE inbox_messages SET completed_at=now() WHERE consumer_name=$1 AND message_id=$2", consumidor, mensagemID)
+	return err
+}
 
 func (s *Store) CreateWallet(ctx context.Context, playerID string, money domain.Money) (Wallet, error) {
 	tx, err := s.pool.Begin(ctx)
