@@ -364,6 +364,54 @@ func TestFluxoBetEWin(t *testing.T) {
 	}
 }
 
+func TestFluxoRefundComReferencia(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "true" {
+		t.Skip("defina INTEGRATION=true")
+	}
+	internal := obterToken(t, "wallet-internal", "internal-secret")
+	provider := obterToken(t, "provider-a", "provider-a-secret")
+	playerID := "00000000-0000-0000-0000-" + fmt.Sprintf("%012d", (time.Now().UnixNano()+4)%1000000000000)
+	criar := `{"playerId":"` + playerID + `","initialBalance":{"amount":"100.00","currency":"BRL"}}`
+	req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8081/wallets", strings.NewReader(criar))
+	req.Header.Set("Authorization", "Bearer "+internal)
+	req.Header.Set("Content-Type", "application/json")
+	resposta, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var carteira struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resposta.Body).Decode(&carteira); err != nil {
+		resposta.Body.Close()
+		t.Fatal(err)
+	}
+	resposta.Body.Close()
+	if resposta.StatusCode != http.StatusCreated {
+		t.Fatalf("criação da carteira: %d", resposta.StatusCode)
+	}
+	enviar := func(externo, tipo, valor, referencia string) int {
+		corpo := `{"providerId":"provider-a","externalTransactionId":"` + externo + `","walletId":"` + carteira.ID + `","playerId":"` + playerID + `","roundId":"round-refund","gameId":"game-refund","kind":"` + tipo + `","referenceExternalId":"` + referencia + `","money":{"amount":"` + valor + `","currency":"BRL"}}`
+		operacao, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8081/wagering/transactions", strings.NewReader(corpo))
+		operacao.Header.Set("Authorization", "Bearer "+provider)
+		operacao.Header.Set("Idempotency-Key", externo)
+		operacao.Header.Set("Content-Type", "application/json")
+		res, chamadaErr := http.DefaultClient.Do(operacao)
+		if chamadaErr != nil {
+			t.Fatal(chamadaErr)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	original := "refund-original-" + playerID
+	if status := enviar(original, "BET", "20.00", ""); status != http.StatusOK {
+		t.Fatalf("BET: %d", status)
+	}
+	if status := enviar("refund-"+playerID, "REFUND", "20.00", original); status != http.StatusOK {
+		t.Fatalf("REFUND: %d", status)
+	}
+}
+
 func obterToken(t *testing.T, cliente, segredo string) string {
 	t.Helper()
 	form := url.Values{"client_id": {cliente}, "client_secret": {segredo}, "grant_type": {"client_credentials"}}

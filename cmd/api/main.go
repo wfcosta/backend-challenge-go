@@ -124,6 +124,7 @@ func main() {
 			roundID, _ := raw["roundId"].(string)
 			gameID, _ := raw["gameId"].(string)
 			kind, _ := raw["kind"].(string)
+			referenceExternalID, _ := raw["referenceExternalId"].(string)
 			dinheiro, _ := raw["money"].(map[string]any)
 			amount, _ := dinheiro["amount"].(string)
 			currency, _ := dinheiro["currency"].(string)
@@ -132,7 +133,7 @@ func main() {
 				writeJSON(w, 400, map[string]string{"error": err.Error()})
 				return
 			}
-			result, err := db.ProcessarAposta(r.Context(), application.EntradaAposta{ProviderID: providerID, ExternalID: externalID, PlayerID: playerID, WalletID: walletID, RoundID: roundID, GameID: gameID, Kind: kind, Money: money}, key)
+			result, err := db.ProcessarAposta(r.Context(), application.EntradaAposta{ProviderID: providerID, ExternalID: externalID, PlayerID: playerID, WalletID: walletID, RoundID: roundID, GameID: gameID, Kind: kind, Money: money, ReferenceExternalID: referenceExternalID}, key)
 			if err != nil {
 				if errors.Is(err, application.ErroConflitoIdempotencia) {
 					writeJSON(w, 409, map[string]string{"error": err.Error()})
