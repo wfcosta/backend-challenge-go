@@ -1,6 +1,7 @@
 package integracao
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	adaptadorsqs "github.com/wfcosta/backend-challenge-go/internal/adapters/sqs"
 )
 
 func TestAPIComCompose(t *testing.T) {
@@ -66,6 +70,29 @@ func TestAPIComCompose(t *testing.T) {
 	resposta.Body.Close()
 	if resposta.StatusCode != http.StatusBadRequest {
 		t.Fatalf("valor monetário inválido: %d", resposta.StatusCode)
+	}
+}
+
+func TestFilasSQSProvisionadas(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "true" {
+		t.Skip("defina INTEGRATION=true")
+	}
+	t.Setenv("AWS_ACCESS_KEY_ID", "test")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
+	t.Setenv("AWS_REGION", "us-east-1")
+	cliente, err := adaptadorsqs.NovoCliente(context.Background(), "us-east-1", "http://127.0.0.1:4566")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultado, err := cliente.ListQueues(context.Background(), &sqs.ListQueuesInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	texto := strings.Join(resultado.QueueUrls, "\n")
+	for _, fila := range []string{"wager-transactions.fifo", "wager-transactions-dlq.fifo"} {
+		if !strings.Contains(texto, fila) {
+			t.Fatalf("fila SQS ausente: %s", fila)
+		}
 	}
 }
 
