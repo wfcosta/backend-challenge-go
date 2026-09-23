@@ -17,6 +17,7 @@ import (
 	"github.com/wfcosta/backend-challenge-go/internal/domain"
 	"github.com/wfcosta/backend-challenge-go/internal/store"
 	"github.com/wfcosta/backend-challenge-go/internal/worker"
+	"go.uber.org/fx"
 )
 
 func main() {
@@ -193,18 +194,29 @@ func main() {
 		defer cancelarWorkers()
 	}
 	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
-	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("http server stopped", "error", err)
-			os.Exit(1)
-		}
-	}()
+	aplicacao := fx.New(fx.Invoke(func(lifecycle fx.Lifecycle) {
+		lifecycle.Append(fx.Hook{
+			OnStart: func(context.Context) error {
+				go func() {
+					if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+						slog.Error("servidor HTTP parou", "erro", err)
+					}
+				}()
+				return nil
+			},
+			OnStop: func(ctx context.Context) error { return server.Shutdown(ctx) },
+		})
+	}))
+	if err := aplicacao.Start(context.Background()); err != nil {
+		slog.Error("falha ao iniciar Fx", "erro", err)
+		os.Exit(1)
+	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_ = server.Shutdown(ctx)
+	_ = aplicacao.Stop(ctx)
 }
 
 func autenticarRotas(proximo http.Handler, autenticador *auth.Autenticador) http.Handler {
