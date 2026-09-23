@@ -56,6 +56,15 @@ func (i inboxTeste) Registrar(context.Context, string, string, string) (bool, er
 }
 func (i inboxTeste) Concluir(context.Context, string, string) error { return nil }
 
+type inboxFalhaConclusao struct{}
+
+func (inboxFalhaConclusao) Registrar(context.Context, string, string, string) (bool, error) {
+	return true, nil
+}
+func (inboxFalhaConclusao) Concluir(context.Context, string, string) error {
+	return errors.New("falha ao concluir inbox")
+}
+
 func TestConsumidorNaoConfirmaMensagemQuandoTratamentoFalha(t *testing.T) {
 	cliente := &clienteMensagensTeste{mensagens: []types.Message{{MessageId: aws.String("m1"), ReceiptHandle: aws.String("r1"), Body: aws.String("{}")}}}
 	ctx, cancelar := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -79,5 +88,18 @@ func TestConsumidorRemoveMensagemDuplicada(t *testing.T) {
 	cliente.mu.Unlock()
 	if deletes != 1 {
 		t.Fatalf("duplicata deveria ser removida: %d", deletes)
+	}
+}
+
+func TestConsumidorNaoConfirmaQuandoConclusaoDoInboxFalha(t *testing.T) {
+	cliente := &clienteMensagensTeste{mensagens: []types.Message{{MessageId: aws.String("m1"), ReceiptHandle: aws.String("r1"), Body: aws.String("{}")}}}
+	ctx, cancelar := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancelar()
+	Consumidor{Cliente: cliente, FilaURL: "fila", Tratador: tratadorTeste{}, Inbox: inboxFalhaConclusao{}}.Executar(ctx)
+	cliente.mu.Lock()
+	deletes := cliente.deletes
+	cliente.mu.Unlock()
+	if deletes != 0 {
+		t.Fatalf("mensagem não deveria ser removida sem concluir inbox: %d", deletes)
 	}
 }
